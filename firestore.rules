@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // === Helper Functions ===
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+    function isMonitor() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'MONITOR';
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // === Users Collection ===
+    match /users/{userId} {
+      // Anyone authenticated can read their own profile
+      allow read: if isOwner(userId) || isAdmin() || isMonitor();
+      // Only the user themselves can create their profile (on first login)
+      // Admin can update any user
+      allow create: if isOwner(userId) || isAdmin();
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if false; // Never delete users
+    }
+
+    // === Elections Collection ===
+    match /elections/{electionId} {
+      // Authenticated users can read elections
+      allow read: if isAuthenticated();
+      // Only admin can create/update elections
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // === Candidates Collection ===
+    match /candidates/{candidateId} {
+      // Authenticated users can read candidates
+      allow read: if isAuthenticated();
+      // Only admin can manage candidates
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // === Votes Collection ===
+    match /votes/{voteId} {
+      // Users can read their own votes; admin/monitor can read all
+      allow read: if isAuthenticated() &&
+        (resource == null || resource.data.userId == request.auth.uid || isAdmin() || isMonitor());
+      // Any authenticated user can create a vote (one-vote rule enforced in app code)
+      allow create: if isAuthenticated();
+      // Votes CANNOT be modified or deleted (immutable)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // === Audit Logs Collection ===
+    match /audit_logs/{logId} {
+      // Only admin and monitor can read audit logs
+      allow read: if isAdmin() || isMonitor();
+      // System can create audit logs (authenticated users)
+      allow create: if isAuthenticated();
+      // Audit logs are immutable
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

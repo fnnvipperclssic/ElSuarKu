@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ElSuarKu</string>
+    <string name="tagline">Aman, Transparan, Cepat, dan Terpercaya</string>
+
+    <!-- Auth -->
+    <string name="sign_in_with_google">Masuk dengan Google</string>
+    <string name="sign_in_with_email">Masuk dengan Email</string>
+    <string name="email_label">Email</string>
+    <string name="password_label">Kata Sandi</string>
+    <string name="sign_in">Masuk</string>
+    <string name="register">Daftar</string>
+    <string name="forgot_password">Lupa Kata Sandi?</string>
+    <string name="dont_have_account">Belum punya akun?</string>
+    <string name="already_have_account">Sudah punya akun?</string>
+
+    <!-- Voting -->
+    <string name="vote_now">Pilih Sekarang</string>
+    <string name="vote_confirmed">Suara Terkirim!</string>
+    <string name="vote_subtitle">Suara Anda telah tercatat dengan aman</string>
+    <string name="confirm_vote">Konfirmasi Pilihan</string>
+    <string name="verify_identity">Verifikasi Identitas</string>
+    <string name="biometric_prompt_title">Verifikasi Biometrik</string>
+    <string name="biometric_prompt_subtitle">Konfirmasikan identitas Anda untuk melanjutkan voting</string>
+
+    <!-- Dashboard -->
+    <string name="active_elections">Pemilihan Aktif</string>
+    <string name="voting_history">Riwayat Voting</string>
+    <string name="account_security">Keamanan Akun</string>
+
+    <!-- Admin -->
+    <string name="manage_elections">Kelola Pemilihan</string>
+    <string name="manage_candidates">Kelola Kandidat</string>
+    <string name="export_report">Export Laporan</string>
+
+    <!-- Monitor -->
+    <string name="live_statistics">Statistik Langsung</string>
+    <string name="audit_logs">Log Audit</string>
+    <string name="security_alerts">Peringatan Keamanan</string>
+
+    <!-- General -->
+    <string name="loading">Memuat…</string>
+    <string name="error_occurred">Terjadi kesalahan</string>
+    <string name="retry">Coba Lagi</string>
+    <string name="cancel">Batal</string>
+    <string name="confirm">Konfirmasi</string>
+    <string name="logout">Keluar</string>
+    <string name="settings">Pengaturan</string>
+
+    <!-- Google Sign-In Web Client ID -->
+    <!-- DAPATKAN dari: Firebase Console → Authentication → Sign-in method → Google → Web SDK configuration -->
+    <!-- GANTI dengan Web Client ID project Firebase ANDA sendiri -->
+    <string name="default_web_client_id">YOUR_WEB_CLIENT_ID.apps.googleusercontent.com</string>
+</resources>

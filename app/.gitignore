@@ -1,0 +1,3 @@
+/build
+# Jangan upload google-services.json — berisi API key & OAuth client ID
+/google-services.json

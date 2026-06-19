@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme — Compose handles all theming; this is a minimal fallback -->
+    <style name="Theme.ElSuarKu" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/deep_blue_dark</item>
+        <item name="android:navigationBarColor">@color/deep_blue_dark</item>
+        <item name="android:windowBackground">@color/deep_blue_dark</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
