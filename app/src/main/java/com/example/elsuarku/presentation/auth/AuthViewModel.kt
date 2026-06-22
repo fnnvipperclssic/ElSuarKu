@@ -39,143 +39,149 @@ class AuthViewModel(
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     val loginState: StateFlow<LoginUiState> = _loginState.asStateFlow()
 
-    companion object {
-        private const val TAG = "AuthViewModel"
-    }
+    companion object { private const val TAG = "AuthViewModel" }
 
-    init {
-        observeAuthState()
-    }
+    // CRITICAL: Prevent observeAuthState from processing during active sign-in
+    // Firebase AuthStateListener fires during signInWithEmailAndPassword().await()
+    // BEFORE our signIn method can set the correct role. This flag blocks that.
+    @Volatile
+    private var isSigningIn = false
 
-    /**
-     * Observe Firebase Auth state for auto-login (e.g., app restart with cached session).
-     * NOT used for fresh sign-in — signIn methods directly set authState to avoid race conditions.
-     */
+    init { observeAuthState() }
+
     private fun observeAuthState() {
         viewModelScope.launch {
             authRepository.observeAuthState().collect { firebaseUser ->
                 if (firebaseUser != null) {
-                    // Only process if we don't already have a valid auth state with role
-                    val currentState = _authState.value
-                    if (currentState is AuthUiState.Authenticated) {
-                        return@collect // Already authenticated — skip
+                    // SKIP if currently signing in — signIn methods handle auth state directly
+                    if (isSigningIn) {
+                        Log.d(TAG, "observeAuthState: skipping (sign-in in progress)")
+                        return@collect
+                    }
+                    // SKIP if already authenticated with role
+                    if (_authState.value is AuthUiState.Authenticated) {
+                        Log.d(TAG, "observeAuthState: already authenticated, skipping")
+                        return@collect
                     }
 
                     val name = firebaseUser.displayName ?: ""
                     val email = firebaseUser.email ?: ""
+                    Log.d(TAG, "observeAuthState: restoring session for uid=${firebaseUser.uid}")
 
-                    // Try to get role from Firestore
                     when (val result = authRepository.getOrCreateUserPublic(firebaseUser.uid, name, email)) {
                         is Resource.Success -> {
                             val user = result.data
-                            sessionManager.saveUserInfo(user.uid, user.role, user.name)
-                            Log.i(TAG, "Auth restored from Firestore: uid=${user.uid}, role=${user.role}")
-                            setAuthenticatedState(user.uid, user.name, user.email, user.role)
+                            sessionManager.saveUserInfo(user.uid, user.role, user.name, user.email)
+                            Log.i(TAG, "observeAuthState: restored role=${user.role} for ${user.email}")
+                            _authState.value = AuthUiState.Authenticated(user.uid, user.name, user.email, user.role)
                         }
                         is Resource.Error -> {
-                            // Firestore failed — try session cache
                             val cachedRole = sessionManager.getUserRole()
                             if (cachedRole != null) {
-                                Log.w(TAG, "Firestore read failed, using cached role: $cachedRole. Error: ${result.message}")
-                                setAuthenticatedState(firebaseUser.uid, name, email, cachedRole)
+                                Log.w(TAG, "observeAuthState: Firestore failed, using cached role=$cachedRole")
+                                _authState.value = AuthUiState.Authenticated(firebaseUser.uid, name, email, cachedRole)
                             } else {
-                                Log.w(TAG, "Firestore read failed and no cached role. Error: ${result.message}")
-                                // Don't auto-login if we can't determine role
+                                Log.w(TAG, "observeAuthState: no cached role, showing not authenticated")
                                 _authState.value = AuthUiState.NotAuthenticated
                             }
                         }
                         is Resource.Loading -> {}
                     }
                 } else {
-                    _authState.value = AuthUiState.NotAuthenticated
+                    if (!isSigningIn) {
+                        _authState.value = AuthUiState.NotAuthenticated
+                    }
                 }
-            }
-        }
-    }
-
-    private fun setAuthenticatedState(uid: String, name: String, email: String, role: UserRole) {
-        _authState.value = AuthUiState.Authenticated(
-            uid = uid, name = name, email = email, role = role
-        )
-    }
-
-    fun signInWithGoogle(idToken: String) {
-        viewModelScope.launch {
-            _loginState.value = LoginUiState.Loading
-            when (val result = authRepository.signInWithGoogle(idToken)) {
-                is Resource.Success -> {
-                    val user = result.data
-                    // Save session FIRST
-                    sessionManager.saveUserInfo(user.uid, user.role, user.name)
-                    // Log audit
-                    auditRepository.log(user.uid, user.name, user.role.name, AuditAction.LOGIN, user.uid, user.name)
-                    // DIRECTLY set auth state — bypass observeAuthState to avoid race
-                    Log.i(TAG, "Google sign-in success: uid=${user.uid}, role=${user.role}")
-                    setAuthenticatedState(user.uid, user.name, user.email, user.role)
-                    _loginState.value = LoginUiState.Success(user.role)
-                }
-                is Resource.Error -> {
-                    Log.e(TAG, "Google sign-in failed: ${result.message}")
-                    _loginState.value = LoginUiState.Error(result.message)
-                }
-                is Resource.Loading -> {}
             }
         }
     }
 
     fun signInWithEmail(email: String, password: String) {
         viewModelScope.launch {
+            isSigningIn = true  // BLOCK observeAuthState
             _loginState.value = LoginUiState.Loading
+            Log.d(TAG, "signInWithEmail: starting for $email")
+
             when (val result = authRepository.signInWithEmail(email, password)) {
                 is Resource.Success -> {
                     val user = result.data
-                    // Save session FIRST — before any state update
-                    sessionManager.saveUserInfo(user.uid, user.role, user.name)
-                    // Log audit
+                    sessionManager.saveUserInfo(user.uid, user.role, user.name, user.email)
                     auditRepository.log(user.uid, user.name, user.role.name, AuditAction.LOGIN, user.uid, user.name)
-                    // DIRECTLY set auth state with correct role — bypass observeAuthState race
-                    Log.i(TAG, "Email sign-in success: uid=${user.uid}, role=${user.role}, name=${user.name}")
-                    setAuthenticatedState(user.uid, user.name, user.email, user.role)
+                    Log.i(TAG, "signInWithEmail: SUCCESS uid=${user.uid} role=${user.role} name=${user.name}")
+                    _authState.value = AuthUiState.Authenticated(user.uid, user.name, user.email, user.role)
                     _loginState.value = LoginUiState.Success(user.role)
                 }
                 is Resource.Error -> {
-                    Log.e(TAG, "Email sign-in failed: ${result.message}")
+                    Log.e(TAG, "signInWithEmail: FAILED ${result.message}")
                     _loginState.value = LoginUiState.Error(result.message)
+                    _authState.value = AuthUiState.NotAuthenticated
                 }
                 is Resource.Loading -> {}
             }
+            isSigningIn = false // UNBLOCK observeAuthState
+        }
+    }
+
+    fun signInWithGoogle(idToken: String) {
+        viewModelScope.launch {
+            isSigningIn = true
+            _loginState.value = LoginUiState.Loading
+            when (val result = authRepository.signInWithGoogle(idToken)) {
+                is Resource.Success -> {
+                    val user = result.data
+                    sessionManager.saveUserInfo(user.uid, user.role, user.name, user.email)
+                    auditRepository.log(user.uid, user.name, user.role.name, AuditAction.LOGIN, user.uid, user.name)
+                    Log.i(TAG, "signInWithGoogle: SUCCESS role=${user.role}")
+                    _authState.value = AuthUiState.Authenticated(user.uid, user.name, user.email, user.role)
+                    _loginState.value = LoginUiState.Success(user.role)
+                }
+                is Resource.Error -> {
+                    Log.e(TAG, "signInWithGoogle: FAILED ${result.message}")
+                    _loginState.value = LoginUiState.Error(result.message)
+                    _authState.value = AuthUiState.NotAuthenticated
+                }
+                is Resource.Loading -> {}
+            }
+            isSigningIn = false
         }
     }
 
     fun register(name: String, email: String, password: String) {
         viewModelScope.launch {
+            isSigningIn = true  // Prevent observeAuthState from interfering
             _loginState.value = LoginUiState.Loading
             when (val result = authRepository.registerWithEmail(name, email, password)) {
                 is Resource.Success -> {
-                    _loginState.value = LoginUiState.Success(UserRole.PEMILIH)
+                    // Auto-login after successful registration
+                    val user = result.data
+                    sessionManager.saveUserInfo(user.uid, user.role, user.name, user.email)
+                    auditRepository.log(user.uid, user.name, user.role.name, AuditAction.REGISTER, user.uid, user.name)
+                    Log.i(TAG, "register: SUCCESS — auto-login uid=${user.uid} role=${user.role}")
+                    _authState.value = AuthUiState.Authenticated(user.uid, user.name, user.email, user.role)
+                    _loginState.value = LoginUiState.Success(user.role)
                 }
                 is Resource.Error -> {
+                    Log.e(TAG, "register: FAILED ${result.message}")
                     _loginState.value = LoginUiState.Error(result.message)
+                    _authState.value = AuthUiState.NotAuthenticated
                 }
                 is Resource.Loading -> {}
             }
+            isSigningIn = false
         }
     }
 
     fun logout() {
         val uid = sessionManager.getUserId() ?: ""
-        val role = sessionManager.getUserRole()?.name ?: ""
         val name = sessionManager.getUserName()
-        viewModelScope.launch {
-            auditRepository.log(uid, name, role, AuditAction.LOGOUT)
-        }
+        val role = sessionManager.getUserRole()?.name ?: ""
+        viewModelScope.launch { auditRepository.log(uid, name, role, AuditAction.LOGOUT) }
+        isSigningIn = false
         authRepository.signOut()
         sessionManager.clearSession()
         _authState.value = AuthUiState.NotAuthenticated
         _loginState.value = LoginUiState.Idle
     }
 
-    fun resetLoginState() {
-        _loginState.value = LoginUiState.Idle
-    }
+    fun resetLoginState() { _loginState.value = LoginUiState.Idle }
 }

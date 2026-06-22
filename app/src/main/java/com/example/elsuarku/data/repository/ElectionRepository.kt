@@ -102,6 +102,22 @@ class ElectionRepository(
     }
 
     /**
+     * Get ALL elections regardless of status (Admin view).
+     */
+    suspend fun getAllElections(): Resource<List<Election>> {
+        return try {
+            val snapshot = collection
+                .orderBy("startDate")
+                .get()
+                .await()
+            val elections = snapshot.toObjects(Election::class.java)
+            Resource.success(elections)
+        } catch (e: Exception) {
+            Resource.error(e.localizedMessage ?: "Gagal memuat pemilihan", e)
+        }
+    }
+
+    /**
      * Update an election (Admin only).
      */
     suspend fun updateElection(election: Election): Resource<Unit> {

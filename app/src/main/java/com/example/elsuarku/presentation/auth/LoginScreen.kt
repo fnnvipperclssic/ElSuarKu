@@ -3,46 +3,24 @@ package com.example.elsuarku.presentation.auth
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -51,14 +29,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.elsuarku.data.SeedUsers
 import com.example.elsuarku.presentation.components.ErrorDialog
+import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
-import com.example.elsuarku.ui.theme.DeepBlue
-import com.example.elsuarku.ui.theme.DeepBlueDark
-import com.example.elsuarku.ui.theme.Gold
-import com.example.elsuarku.ui.theme.OnDeepBlue
-import com.example.elsuarku.ui.theme.SoftWhite
+import com.example.elsuarku.ui.theme.*
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
@@ -81,7 +57,10 @@ fun LoginScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // Google Sign-In client
+    // Entrance animation
+    val entryAlpha by animateFloatAsState(targetValue = 1f, animationSpec = tween(400), label = "entry")
+    val entryOffset by animateDpAsState(targetValue = 0.dp, animationSpec = tween(500, easing = FastOutSlowInEasing), label = "entry_offset")
+
     val googleSignInClient = remember {
         GoogleSignIn.getClient(
             context,
@@ -133,134 +112,208 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepBlueDark)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(DeepBlueDarker, DeepBlueDark, DeepBlue)
+                )
+            )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp)
+                .alpha(entryAlpha)
+                .offset(y = entryOffset),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Branding
+            Spacer(Modifier.height(48.dp))
+
+            // ── Brand Hero ──
+            Icon(
+                imageVector = Icons.Filled.Shield,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = Gold
+            )
+            Spacer(Modifier.height(16.dp))
             Text(
                 text = "ElSuarKu",
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                color = OnDeepBlue
+                style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold),
+                color = OnDeepBlue,
+                letterSpacing = (-1).sp
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = "Aman, Transparan, Cepat, dan Terpercaya",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnDeepBlue.copy(alpha = 0.7f),
+                text = "Platform E-Voting Berbasis Cloud",
+                style = MaterialTheme.typography.bodyLarge,
+                color = OnDeepBlue.copy(alpha = 0.55f),
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Aman • Transparan • Cepat • Terpercaya",
+                style = MaterialTheme.typography.bodySmall,
+                color = Gold.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(Modifier.height(40.dp))
 
-            // ---- Google Sign-In Button ----
-            OutlinedButton(
-                onClick = {
-                    isGoogleSigningIn = true
-                    googleSignInLauncher.launch(googleSignInClient.signInIntent)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                enabled = !isGoogleSigningIn && loginState !is AuthViewModel.LoginUiState.Loading,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (isGoogleSigningIn) {
-                    LoadingIndicator()
-                } else {
-                    Text("G", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = SoftWhite)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Masuk dengan Google", color = OnDeepBlue, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ---- Divider ----
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Canvas(modifier = Modifier.weight(1f).height(1.dp)) {
-                    drawLine(OnDeepBlue.copy(alpha = 0.2f), Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f)
-                }
-                Text(
-                    "  atau masuk dengan email  ",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnDeepBlue.copy(alpha = 0.5f)
-                )
-                Canvas(modifier = Modifier.weight(1f).height(1.dp)) {
-                    drawLine(OnDeepBlue.copy(alpha = 0.2f), Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ---- Email Field ----
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = { Text("Email") },
-                leadingIcon = { Icon(Icons.Filled.Email, "Email", tint = OnDeepBlue.copy(alpha = 0.7f)) },
+            // ── Login Card ──
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                singleLine = true,
-                colors = authTextFieldColors()
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ---- Password Field ----
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Kata Sandi") },
-                leadingIcon = { Icon(Icons.Filled.Lock, "Password", tint = OnDeepBlue.copy(alpha = 0.7f)) },
-                trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                            "Toggle password",
-                            tint = OnDeepBlue.copy(alpha = 0.7f)
+                isDark = true,
+                cornerRadius = 20.dp
+            ) {
+                // Google Sign-In
+                OutlinedButton(
+                    onClick = {
+                        isGoogleSigningIn = true
+                        googleSignInLauncher.launch(googleSignInClient.signInIntent)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    enabled = !isGoogleSigningIn && loginState !is AuthViewModel.LoginUiState.Loading,
+                    shape = RoundedCornerShape(12.dp),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = Brush.horizontalGradient(listOf(Gold, GoldLight))
+                    )
+                ) {
+                    if (isGoogleSigningIn) {
+                        LoadingIndicator()
+                    } else {
+                        Text(
+                            "G",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = Gold
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "Masuk dengan Google",
+                            color = OnDeepBlue.copy(alpha = 0.9f),
+                            style = MaterialTheme.typography.labelLarge
                         )
                     }
-                },
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                singleLine = true,
-                colors = authTextFieldColors()
-            )
+                }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(Modifier.height(20.dp))
 
-            // ---- Login Button ----
-            Button(
-                onClick = { authViewModel.signInWithEmail(email, password) },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                enabled = email.isNotBlank() && password.isNotBlank() && loginState !is AuthViewModel.LoginUiState.Loading,
-                colors = ButtonDefaults.buttonColors(containerColor = Gold),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (loginState is AuthViewModel.LoginUiState.Loading) {
-                    LoadingIndicator()
-                } else {
-                    Text("Masuk", style = MaterialTheme.typography.labelLarge, color = DeepBlueDark)
+                // Divider
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Canvas(Modifier.weight(1f).height(1.dp)) {
+                        drawLine(
+                            OnDeepBlue.copy(alpha = 0.15f),
+                            Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
+                        )
+                    }
+                    Text(
+                        "  atau masuk dengan email  ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnDeepBlue.copy(alpha = 0.4f)
+                    )
+                    Canvas(Modifier.weight(1f).height(1.dp)) {
+                        drawLine(
+                            OnDeepBlue.copy(alpha = 0.15f),
+                            Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // Email field
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Email, "Email", tint = OnDeepBlue.copy(alpha = 0.6f))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next
+                    ),
+                    singleLine = true,
+                    colors = authTextFieldColors(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Password field
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Kata Sandi") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Lock, "Password", tint = OnDeepBlue.copy(alpha = 0.6f))
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                "Toggle password",
+                                tint = OnDeepBlue.copy(alpha = 0.6f)
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    singleLine = true,
+                    colors = authTextFieldColors(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                // Login button
+                Button(
+                    onClick = { authViewModel.signInWithEmail(email, password) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    enabled = email.isNotBlank() && password.isNotBlank()
+                            && loginState !is AuthViewModel.LoginUiState.Loading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Gold),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (loginState is AuthViewModel.LoginUiState.Loading) {
+                        LoadingIndicator()
+                    } else {
+                        Text(
+                            "Masuk",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = DeepBlueDark
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Register link
+                TextButton(
+                    onClick = onNavigateToRegister,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Belum punya akun? Daftar di sini",
+                        color = Gold.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(32.dp))
 
-            // ---- Register Link ----
-            TextButton(onClick = onNavigateToRegister) {
-                Text("Belum punya akun? Daftar di sini", color = OnDeepBlue.copy(alpha = 0.8f))
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // ---- Debug: Seed Test Users ----
+            // Debug seed button
             TextButton(onClick = {
                 coroutineScope.launch(Dispatchers.IO) {
                     val results = SeedUsers.seed()
@@ -269,24 +322,31 @@ fun LoginScreen(
                     }
                 }
             }) {
-                Text("[Dev] Seed Test Users", color = OnDeepBlue.copy(alpha = 0.35f), style = MaterialTheme.typography.labelSmall)
+                Text(
+                    "[Dev] Seed Test Users",
+                    color = OnDeepBlue.copy(alpha = 0.25f),
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 
-    // Error dialog
     showError?.let { error ->
         ErrorDialog(message = error, onDismiss = { showError = null })
     }
 }
 
 @Composable
-internal fun authTextFieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+internal fun authTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = OnDeepBlue,
-    unfocusedTextColor = OnDeepBlue.copy(alpha = 0.8f),
+    unfocusedTextColor = OnDeepBlue.copy(alpha = 0.75f),
     focusedBorderColor = Gold,
-    unfocusedBorderColor = OnDeepBlue.copy(alpha = 0.3f),
+    unfocusedBorderColor = OnDeepBlue.copy(alpha = 0.2f),
     focusedLabelColor = Gold,
-    unfocusedLabelColor = OnDeepBlue.copy(alpha = 0.6f),
-    cursorColor = Gold
+    unfocusedLabelColor = OnDeepBlue.copy(alpha = 0.5f),
+    cursorColor = Gold,
+    focusedContainerColor = DeepBlueDark.copy(alpha = 0.4f),
+    unfocusedContainerColor = DeepBlueDark.copy(alpha = 0.2f)
 )

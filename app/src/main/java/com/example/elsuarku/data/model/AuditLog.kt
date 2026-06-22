@@ -24,6 +24,7 @@ data class AuditLog(
 
 @Serializable
 enum class AuditAction {
+    REGISTER,
     LOGIN,
     LOGOUT,
     VOTE_CAST,

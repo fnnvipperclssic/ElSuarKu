@@ -41,11 +41,12 @@ class SessionManager(context: Context) {
 
     // ---- User Info ----
 
-    fun saveUserInfo(uid: String, role: UserRole, name: String = "") {
+    fun saveUserInfo(uid: String, role: UserRole, name: String = "", email: String = "") {
         prefs.edit()
             .putString(Constants.PREF_USER_UID, uid)
             .putString(Constants.PREF_USER_ROLE, role.name)
             .putString(Constants.PREF_USER_NAME, name)
+            .putString(Constants.PREF_USER_EMAIL, email)
             .putLong(Constants.PREF_LAST_LOGIN, System.currentTimeMillis())
             .apply()
     }
@@ -53,6 +54,8 @@ class SessionManager(context: Context) {
     fun getUserId(): String? = prefs.getString(Constants.PREF_USER_UID, null)
 
     fun getUserName(): String = prefs.getString(Constants.PREF_USER_NAME, "") ?: ""
+
+    fun getUserEmail(): String = prefs.getString(Constants.PREF_USER_EMAIL, "") ?: ""
 
     fun getUserRole(): UserRole? {
         val roleStr = prefs.getString(Constants.PREF_USER_ROLE, null) ?: return null

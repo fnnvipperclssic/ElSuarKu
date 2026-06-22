@@ -7,15 +7,6 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-/.idea/deploymentTargetSelector.xml
-/.idea/appInsightsSettings.xml
-/.idea/deviceManager.xml
 .DS_Store
 /build
 /captures
@@ -23,13 +14,18 @@
 .cxx
 local.properties
 
+# --- IDE (Android Studio / IntelliJ) ---
+# Abaikan semua .idea kecuali konfigurasi shared
+.idea/
+!.idea/codeStyles/
+!.idea/codeStyles/**
+!.idea/runConfigurations/
+!.idea/runConfigurations/**
+!.idea/.gitignore
+
 # --- Firebase — DATA SENSITIF (API keys, OAuth IDs) ---
 app/google-services.json
 **/google-services.json
-
-# --- Claude Code / AI Tools ---
-.claude/
-**/.claude/
 *.logcat
 
 # --- Android Signing Keys ---
@@ -46,6 +42,8 @@ app/signing.properties
 secrets/
 **/secrets.*
 **/credentials.*
+**/secret.properties
+**/secrets.properties
 
 # --- OS files ---
 Thumbs.db
@@ -54,7 +52,24 @@ Thumbs.db
 *~
 .vscode/
 
-# --- Log files ---
+# --- Log & Debug ---
 *.log
 *.logcat
 logs/
+*.hprof
+*.trace
+
+# --- Build outputs (release APK/AAB tidak di-commit) ---
+app/release/
+*.apk
+*.aab
+*.ap_
+
+# --- Testing ---
+/test-results/
+/test-output/
+
+# --- Misc tool outputs ---
+.metals/
+.bloop/
+.bsp/

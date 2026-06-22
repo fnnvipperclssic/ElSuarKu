@@ -13,12 +13,17 @@ import java.util.Locale
 // ---- Date Formatting ----
 
 fun Long.toFormattedDate(pattern: String = "dd MMM yyyy"): String {
-    val fmt = SimpleDateFormat(pattern, Locale("id"))
+    val fmt = SimpleDateFormat(pattern, Locale.forLanguageTag("id"))
     return fmt.format(Date(this))
 }
 
 fun Long.toFormattedDateTime(): String {
-    val fmt = SimpleDateFormat("dd MMM yyyy HH:mm", Locale("id"))
+    val fmt = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.forLanguageTag("id"))
+    return fmt.format(Date(this))
+}
+
+fun Long.toFormattedDateTimeFull(): String {
+    val fmt = SimpleDateFormat("dd MMM yyyy HH:mm:ss", Locale.forLanguageTag("id"))
     return fmt.format(Date(this))
 }
 

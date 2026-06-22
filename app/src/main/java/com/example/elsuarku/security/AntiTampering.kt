@@ -1,6 +1,7 @@
 package com.example.elsuarku.security
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
@@ -17,8 +18,15 @@ import java.io.InputStreamReader
  *
  * These checks help ensure vote integrity by preventing compromised devices
  * from participating in elections.
+ *
+ * NOTE: Emulator and debugger checks are SKIPPED in debug builds to allow development.
+ * Root and hook framework detection always run (actual security threats).
  */
 class AntiTampering(private val context: Context) {
+
+    private val isDebugBuild: Boolean by lazy {
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
 
     data class IntegrityResult(
         val isSafe: Boolean,
@@ -27,13 +35,17 @@ class AntiTampering(private val context: Context) {
 
     /**
      * Run all integrity checks. Returns true only if ALL pass.
+     *
+     * In DEBUG builds, emulator and debugger checks are skipped
+     * to allow development. Root and hook framework detection still run
+     * (these indicate actual security threats even during development).
      */
     fun performFullCheck(): IntegrityResult {
         val threats = mutableListOf<String>()
 
         if (isDeviceRooted()) threats.add("ROOT_DETECTED")
-        if (isEmulator()) threats.add("EMULATOR_DETECTED")
-        if (isDebuggerAttached()) threats.add("DEBUGGER_ATTACHED")
+        if (!isDebugBuild && isEmulator()) threats.add("EMULATOR_DETECTED")
+        if (!isDebugBuild && isDebuggerAttached()) threats.add("DEBUGGER_ATTACHED")
         if (isHookFrameworkDetected()) threats.add("HOOK_FRAMEWORK_DETECTED")
 
         return IntegrityResult(

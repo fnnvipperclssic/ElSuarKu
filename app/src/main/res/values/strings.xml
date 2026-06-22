@@ -48,7 +48,7 @@
     <string name="settings">Pengaturan</string>
 
     <!-- Google Sign-In Web Client ID -->
-    <!-- DAPATKAN dari: Firebase Console → Authentication → Sign-in method → Google → Web SDK configuration -->
-    <!-- GANTI dengan Web Client ID project Firebase ANDA sendiri -->
-    <string name="default_web_client_id">YOUR_WEB_CLIENT_ID.apps.googleusercontent.com</string>
+    <!-- DIDAPAT DARI: Firebase Console → Auth → Google → Web SDK configuration -->
+    <!-- Replaced by auto-setup script: tools/setup_firebase.ps1 -->
+    <string name="default_web_client_id">915492781440-qat2d7tk8kdd3p7tbucpdanqf5pfvclu.apps.googleusercontent.com</string>
 </resources>

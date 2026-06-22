@@ -2,9 +2,11 @@ package com.example.elsuarku.presentation.components
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,20 +26,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.foundation.Image
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
 import com.example.elsuarku.data.model.Candidate
-import com.example.elsuarku.ui.theme.DeepBlueLight
-import com.example.elsuarku.ui.theme.Gold
-import com.example.elsuarku.ui.theme.GoldDark
+import com.example.elsuarku.ui.theme.*
 
 /**
- * Card for displaying a candidate in the voting list.
+ * Premium candidate card with rank badge, circular photo, and detail chevron.
  */
 @Composable
 fun CandidateCard(
@@ -47,7 +46,7 @@ fun CandidateCard(
     val bitmap = remember(candidate.photoBase64) {
         if (candidate.photoBase64.isNotBlank()) {
             try {
-                val bytes = Base64.decode(candidate.photoBase64, Base64.NO_WRAP)
+                val bytes = Base64.decode(candidate.photoBase64, Base64.DEFAULT)
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } catch (_: Exception) {
                 null
@@ -56,15 +55,14 @@ fun CandidateCard(
     }
 
     GlassCard(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Nomor Urut
+            // Rank number badge
             NumberBadge(number = candidate.nomorUrut)
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -76,7 +74,8 @@ fun CandidateCard(
                     contentDescription = candidate.name,
                     modifier = Modifier
                         .size(64.dp)
-                        .clip(CircleShape),
+                        .clip(CircleShape)
+                        .border(2.dp, Gold.copy(alpha = 0.3f), CircleShape),
                     contentScale = ContentScale.Crop
                 )
             } else {
@@ -85,27 +84,36 @@ fun CandidateCard(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Info
+            // Candidate info
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = candidate.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (candidate.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = candidate.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
                 if (candidate.visi.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = candidate.visi,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         maxLines = 1
                     )
                 }
             }
 
-            // Chevron
+            // Forward chevron
             Icon(
-                imageVector = Icons.Filled.Person, // Using Person as arrow indicator
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = "Lihat detail",
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
@@ -116,22 +124,29 @@ fun CandidateCard(
 
 @Composable
 private fun NumberBadge(number: Int) {
-    androidx.compose.foundation.layout.Box(
+    val (bgGradient, textColor) = when (number) {
+        1 -> GradientGold to OnGold
+        2 -> listOf(DeepBlueLight, DeepBlue) to OnDeepBlue
+        3 -> listOf(EmeraldGreen, EmeraldGreenDark) to OnEmeraldGreen
+        else -> listOf(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.surfaceVariant
+        ) to MaterialTheme.colorScheme.onSurface
+    }
+
+    Box(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
             .background(
-                if (number == 1) Gold
-                else if (number == 2) DeepBlueLight
-                else MaterialTheme.colorScheme.surfaceVariant
+                brush = Brush.verticalGradient(bgGradient)
             ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = number.toString(),
-            style = MaterialTheme.typography.titleLarge,
-            color = if (number <= 2) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.onSurface
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = textColor
         )
     }
 }
@@ -139,16 +154,19 @@ private fun NumberBadge(number: Int) {
 @Composable
 private fun PlaceholderAvatar(name: String) {
     val initial = name.firstOrNull()?.uppercase() ?: "?"
-    androidx.compose.foundation.layout.Box(
+    val gradient = listOf(DeepBlueLight.copy(alpha = 0.4f), DeepBlueLight.copy(alpha = 0.25f))
+
+    Box(
         modifier = Modifier
             .size(64.dp)
             .clip(CircleShape)
-            .background(DeepBlueLight.copy(alpha = 0.3f)),
+            .background(brush = Brush.verticalGradient(gradient))
+            .border(2.dp, DeepBlueLight.copy(alpha = 0.2f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = initial,
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
             color = DeepBlueLight
         )
     }

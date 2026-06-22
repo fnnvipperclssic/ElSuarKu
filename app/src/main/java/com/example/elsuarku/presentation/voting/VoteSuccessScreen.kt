@@ -1,120 +1,231 @@
 package com.example.elsuarku.presentation.voting
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.elsuarku.ui.theme.DeepBlueDark
-import com.example.elsuarku.ui.theme.EmeraldGreen
-import com.example.elsuarku.ui.theme.Gold
-import com.example.elsuarku.ui.theme.OnDeepBlue
+import com.example.elsuarku.ui.theme.*
 
 @Composable
 fun VoteSuccessScreen(
+    viewModel: VotingViewModel? = null,
     onBackToDashboard: () -> Unit
 ) {
-    var visible by remember { mutableStateOf(false) }
+    val voteState = viewModel?.voteState?.collectAsState()
+    var phase1 by remember { mutableStateOf(false) }
+    var phase2 by remember { mutableStateOf(false) }
+    var phase3 by remember { mutableStateOf(false) }
+    var phase4 by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { visible = true }
+    // Check icon — spring bounce
+    val checkScale by animateFloatAsState(
+        targetValue = if (phase1) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "checkScale"
+    )
 
-    Column(
+    // Glow ring scale
+    val glowScale by animateFloatAsState(
+        targetValue = if (phase1) 1.4f else 0.5f,
+        animationSpec = tween(800, easing = FastOutSlowInEasing),
+        label = "glowScale"
+    )
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (phase1) 0f else 0.3f,
+        animationSpec = tween(1000),
+        label = "glowAlpha"
+    )
+
+    // Text slide up
+    val textOffset by animateDpAsState(
+        targetValue = if (phase2) 0.dp else 40.dp,
+        animationSpec = tween(500, easing = FastOutSlowInEasing),
+        label = "textOffset"
+    )
+    val textAlpha by animateFloatAsState(
+        targetValue = if (phase2) 1f else 0f,
+        animationSpec = tween(500),
+        label = "textAlpha"
+    )
+
+    // Badge slide up
+    val badgeOffset by animateDpAsState(
+        targetValue = if (phase3) 0.dp else 30.dp,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "badgeOffset"
+    )
+
+    // Button slide up
+    val btnOffset by animateDpAsState(
+        targetValue = if (phase4) 0.dp else 60.dp,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "btnOffset"
+    )
+
+    LaunchedEffect(Unit) {
+        phase1 = true
+        kotlinx.coroutines.delay(500)
+        phase2 = true
+        kotlinx.coroutines.delay(400)
+        phase3 = true
+        kotlinx.coroutines.delay(300)
+        phase4 = true
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepBlueDark),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(DeepBlueDarker, DeepBlueDark, DeepBlue)
+                )
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        AnimatedVisibility(
-            visible = visible,
-            enter = scaleIn() + fadeIn()
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(32.dp)
-            ) {
-                // Success icon
+            // Check icon with glow ring
+            Box(contentAlignment = Alignment.Center) {
+                // Glow ring behind check
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .alpha(glowAlpha)
+                        .scale(glowScale)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    EmeraldGreen.copy(alpha = 0.3f),
+                                    EmeraldGreen.copy(alpha = 0f)
+                                )
+                            )
+                        )
+                )
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
                     contentDescription = "Sukses",
-                    modifier = Modifier.size(96.dp),
+                    modifier = Modifier
+                        .size(100.dp)
+                        .scale(checkScale),
                     tint = EmeraldGreen
                 )
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
 
+            // Title + description
+            Column(
+                modifier = Modifier
+                    .offset(y = textOffset)
+                    .alpha(textAlpha),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Text(
-                    text = "Suara Terkirim!",
+                    "Suara Terkirim!",
                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                     color = OnDeepBlue,
                     textAlign = TextAlign.Center
                 )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Suara Anda telah tercatat dengan aman dan terenkripsi. " +
-                            "Terima kasih telah berpartisipasi dalam pemilihan ini.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = OnDeepBlue.copy(alpha = 0.8f),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Security shield icon
-                Icon(
-                    imageVector = Icons.Filled.Shield,
-                    contentDescription = "Aman",
-                    modifier = Modifier.size(48.dp),
-                    tint = Gold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Dilindungi dengan Enkripsi AES-256-GCM",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Gold,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(48.dp))
-
-                Button(
-                    onClick = onBackToDashboard,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Gold),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
+                Spacer(Modifier.height(10.dp))
+                // Show who/what the user voted for
+                voteState?.value?.candidate?.let { candidate ->
                     Text(
-                        text = "Kembali ke Dashboard",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = DeepBlueDark
+                        "Anda memilih:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = OnDeepBlue.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        candidate.name,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = Gold,
+                        textAlign = TextAlign.Center
+                    )
+                    voteState?.value?.election?.let { election ->
+                        Text(
+                            "untuk pemilihan: ${election.title}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnDeepBlue.copy(alpha = 0.5f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } ?: run {
+                    Text(
+                        "Suara Anda telah tercatat dengan aman\ndan terenkripsi. Terima kasih telah\nberpartisipasi!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnDeepBlue.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center,
+                        lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
                     )
                 }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            // Security badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .offset(y = badgeOffset)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Gold.copy(alpha = 0.12f))
+                    .padding(horizontal = 18.dp, vertical = 12.dp)
+            ) {
+                Icon(Icons.Filled.Shield, null, tint = Gold, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(
+                        "Dilindungi AES-256-GCM",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Gold
+                    )
+                    Text(
+                        "Suara Anda tidak dapat diubah",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Gold.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(40.dp))
+
+            // Back button
+            Button(
+                onClick = onBackToDashboard,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .offset(y = btnOffset),
+                colors = ButtonDefaults.buttonColors(containerColor = Gold),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    "Kembali ke Dashboard",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = DeepBlueDark
+                )
             }
         }
     }

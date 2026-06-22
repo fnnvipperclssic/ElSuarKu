@@ -7,45 +7,52 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 /**
- * ElSuarKu Typography — clean, modern, government-grade.
+ * ElSuarKu Typography — refined government-grade type scale.
+ *
+ * Hierarchy:
+ *   Display → hero sections, splash, big numbers
+ *   Headline → section titles, card headers
+ *   Title → card content titles, dialog titles
+ *   Body → paragraphs, descriptions
+ *   Label → buttons, chips, badges, captions
  */
 val AppTypography = Typography(
-    // Large display text for hero sections
+    // ── Display — hero numbers & splash titles ──
     displayLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 36.sp,
-        lineHeight = 44.sp,
-        letterSpacing = (-0.25).sp
+        fontSize = 40.sp,
+        lineHeight = 48.sp,
+        letterSpacing = (-0.5).sp
     ),
     displayMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 36.sp,
-        letterSpacing = 0.sp
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.25).sp
     ),
     displaySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        lineHeight = 32.sp,
+        fontSize = 26.sp,
+        lineHeight = 34.sp,
         letterSpacing = 0.sp
     ),
 
-    // Headlines for section titles
+    // ── Headline — section headers ──
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.25).sp
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp,
+        fontSize = 21.sp,
+        lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
@@ -56,12 +63,12 @@ val AppTypography = Typography(
         letterSpacing = 0.sp
     ),
 
-    // Titles for cards and components
+    // ── Title — card & component headers ──
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 18.sp,
-        lineHeight = 26.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
     titleMedium = TextStyle(
@@ -69,7 +76,7 @@ val AppTypography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.15.sp
+        letterSpacing = 0.1.sp
     ),
     titleSmall = TextStyle(
         fontFamily = FontFamily.Default,
@@ -79,36 +86,36 @@ val AppTypography = Typography(
         letterSpacing = 0.1.sp
     ),
 
-    // Body text
+    // ── Body — running text ──
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.15.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.25.sp
+        letterSpacing = 0.15.sp
     ),
     bodySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.4.sp
+        letterSpacing = 0.2.sp
     ),
 
-    // Labels for buttons, chips, badges
+    // ── Label — buttons, chips, badges, overlines ──
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
+        letterSpacing = 0.5.sp
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.Default,
@@ -120,8 +127,8 @@ val AppTypography = Typography(
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
+        fontSize = 10.sp,
+        lineHeight = 14.sp,
         letterSpacing = 0.5.sp
     )
 )

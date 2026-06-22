@@ -1,57 +1,23 @@
 package com.example.elsuarku.presentation.voting
 
-import android.graphics.BitmapFactory
-import android.util.Base64
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.elsuarku.presentation.components.CandidateCard
+import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
-import com.example.elsuarku.ui.theme.DeepBlue
-import com.example.elsuarku.ui.theme.DeepBlueDark
-import com.example.elsuarku.ui.theme.DeepBlueLight
-import com.example.elsuarku.ui.theme.DeepBlueSurface
-import com.example.elsuarku.ui.theme.EmeraldGreen
-import com.example.elsuarku.ui.theme.Gold
-import com.example.elsuarku.ui.theme.OnDeepBlue
+import com.example.elsuarku.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,9 +29,7 @@ fun CandidateDetailScreen(
 ) {
     val state by viewModel.candidateListState.collectAsState()
 
-    LaunchedEffect(electionId) {
-        viewModel.loadCandidates(electionId)
-    }
+    LaunchedEffect(electionId) { viewModel.loadCandidates(electionId) }
 
     Scaffold(
         topBar = {
@@ -74,12 +38,13 @@ fun CandidateDetailScreen(
                     Text(
                         state.election?.title ?: "Kandidat",
                         color = OnDeepBlue,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, "Kembali", tint = OnDeepBlue)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali", tint = OnDeepBlue)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepBlue)
@@ -87,58 +52,67 @@ fun CandidateDetailScreen(
         }
     ) { padding ->
         if (state.isLoading) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 LoadingIndicator(message = "Memuat kandidat…")
+            }
+        } else if (state.error != null && state.candidates.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                GlassCard(modifier = Modifier.padding(16.dp)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Error, null, tint = StatusError, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("Gagal memuat kandidat", style = MaterialTheme.typography.titleMedium, color = StatusError, fontWeight = FontWeight.SemiBold)
+                        Text(state.error ?: "", style = MaterialTheme.typography.bodySmall, color = DeepBlueLight)
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedButton(onClick = { viewModel.loadCandidates(electionId) }) { Text("Coba Lagi") }
+                    }
+                }
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().background(SoftWhite).padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Election info
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(DeepBlueSurface, RoundedCornerShape(12.dp))
-                            .padding(16.dp)
+                    Surface(
+                        Modifier.fillMaxWidth(),
+                        color = DeepBlueSurface,
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Text(
-                            text = state.election?.description ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = DeepBlueDark
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Pilih satu kandidat di bawah ini:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = DeepBlueLight
-                        )
+                        Column(Modifier.padding(16.dp)) {
+                            Text(
+                                text = state.election?.description ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = DeepBlueDark
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Pilih satu kandidat di bawah ini:",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                color = DeepBlueLight
+                            )
+                        }
                     }
                 }
 
-                // Candidates
                 if (state.candidates.isEmpty()) {
                     item {
-                        Text(
-                            text = "Belum ada kandidat.",
-                            color = DeepBlueLight,
-                            modifier = Modifier.padding(16.dp)
-                        )
+                        GlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Filled.People, null, tint = DeepBlueLight, modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text("Belum ada kandidat.", style = MaterialTheme.typography.bodyMedium, color = DeepBlueLight)
+                            }
+                        }
                     }
                 } else {
                     items(state.candidates) { candidate ->
-                        CandidateCard(
-                            candidate = candidate,
-                            onClick = { onVoteClick(candidate.id) }
-                        )
+                        CandidateCard(candidate = candidate, onClick = { onVoteClick(candidate.id) })
                     }
                 }
+
+                item { Spacer(Modifier.height(8.dp)) }
             }
         }
     }

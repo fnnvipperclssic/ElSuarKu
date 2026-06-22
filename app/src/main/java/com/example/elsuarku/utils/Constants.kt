@@ -17,6 +17,7 @@ object Constants {
     const val PREF_USER_ROLE = "user_role"
     const val PREF_USER_UID = "user_uid"
     const val PREF_USER_NAME = "user_name"
+    const val PREF_USER_EMAIL = "user_email"
     const val PREF_LAST_LOGIN = "last_login"
     const val PREF_BIOMETRIC_ENABLED = "biometric_enabled"
 

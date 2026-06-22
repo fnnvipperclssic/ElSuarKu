@@ -35,12 +35,15 @@ googleServices = "4.4.4"
 coreSplashscreen = "1.0.1"
 # Activity KTX
 activityKtx = "1.10.0"
+# AppCompat
+appcompat = "1.7.0"
 
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

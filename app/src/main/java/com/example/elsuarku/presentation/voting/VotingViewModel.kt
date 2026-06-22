@@ -1,10 +1,12 @@
 package com.example.elsuarku.presentation.voting
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.elsuarku.data.model.AuditAction
 import com.example.elsuarku.data.model.Candidate
 import com.example.elsuarku.data.model.Election
+import com.example.elsuarku.data.model.ElectionStatus
 import com.example.elsuarku.data.model.Vote
 import com.example.elsuarku.data.repository.AuditRepository
 import com.example.elsuarku.data.repository.CandidateRepository
@@ -58,6 +60,8 @@ class VotingViewModel(
 
     private val _voteState = MutableStateFlow(VoteState())
     val voteState: StateFlow<VoteState> = _voteState.asStateFlow()
+
+    companion object { private const val TAG = "VotingViewModel" }
 
     fun loadElections() {
         viewModelScope.launch {
@@ -130,15 +134,52 @@ class VotingViewModel(
 
     fun submitVote(electionId: String, candidateId: String) {
         viewModelScope.launch {
+            Log.i(TAG, "submitVote: starting — election=$electionId candidate=$candidateId")
             _voteState.value = _voteState.value.copy(isSubmitting = true, error = null)
 
             val userId = sessionManager.getUserId() ?: run {
+                Log.e(TAG, "submitVote: FAILED — no userId in session")
                 _voteState.value = _voteState.value.copy(
                     isSubmitting = false,
                     error = "Sesi tidak valid. Silakan login ulang."
                 )
                 return@launch
             }
+            Log.d(TAG, "submitVote: userId=$userId")
+
+            // ── S4: Validate election is still active and not expired ──
+            val election = _voteState.value.election
+            if (election != null) {
+                if (election.status != ElectionStatus.ACTIVE) {
+                    Log.w(TAG, "submitVote: REJECTED — election status=${election.status}")
+                    _voteState.value = _voteState.value.copy(
+                        isSubmitting = false,
+                        error = "Pemilihan sudah tidak aktif (status: ${election.status.name})"
+                    )
+                    return@launch
+                }
+                if (System.currentTimeMillis() > election.endDate) {
+                    Log.w(TAG, "submitVote: REJECTED — election expired (endDate=${election.endDate})")
+                    _voteState.value = _voteState.value.copy(
+                        isSubmitting = false,
+                        error = "Pemilihan sudah berakhir"
+                    )
+                    return@launch
+                }
+                if (System.currentTimeMillis() < election.startDate) {
+                    Log.w(TAG, "submitVote: REJECTED — election not yet started (startDate=${election.startDate})")
+                    _voteState.value = _voteState.value.copy(
+                        isSubmitting = false,
+                        error = "Pemilihan belum dimulai"
+                    )
+                    return@launch
+                }
+            }
+            Log.d(TAG, "submitVote: election validation OK")
+
+            // Compute anonymous voter hash (S2: no plaintext userId in Firestore)
+            val voterHash = IntegrityVerifier.computeVoterHash(userId, electionId)
+            Log.d(TAG, "submitVote: voterHash=${voterHash.take(8)}...")
 
             // Encrypt vote + HMAC integrity + verification token
             val encryptedData: String
@@ -148,41 +189,52 @@ class VotingViewModel(
             try {
                 val timestamp = System.currentTimeMillis()
                 val voteData = "vote:$userId:$electionId:$candidateId:$timestamp"
+                Log.d(TAG, "submitVote: encrypting vote data...")
                 encryptedData = encryptionManager.encrypt(voteData)
-                // Use HMAC-SHA256 for tamper-proof integrity
+                Log.d(TAG, "submitVote: encryption OK — generating integrity signature...")
                 val integrity = IntegrityVerifier.generateVoteSignature(userId, electionId, candidateId, timestamp)
                 hash = integrity.hash
-                hmac = integrity.hmac
+                hmac = integrity.hmac  // S3: HMAC now persisted in Vote model
                 verificationToken = integrity.verificationToken
+                Log.d(TAG, "submitVote: integrity OK — token=${verificationToken.take(8)}...")
             } catch (e: Exception) {
-                _voteState.value = _voteState.value.copy(isSubmitting = false, error = "Gagal mengamankan suara: ${e.localizedMessage ?: "kesalahan enkripsi"}")
+                Log.e(TAG, "submitVote: encryption/integrity FAILED", e)
+                _voteState.value = _voteState.value.copy(
+                    isSubmitting = false,
+                    error = "Gagal mengamankan suara: ${e.localizedMessage ?: "kesalahan enkripsi"}"
+                )
                 return@launch
             }
 
             val vote = Vote(
-                userId = userId,
                 electionId = electionId,
-                candidateId = candidateId,
+                voterHash = voterHash,
                 encryptedVoteData = encryptedData,
                 hash = hash,
+                hmac = hmac,
                 verificationToken = verificationToken
             )
 
+            Log.d(TAG, "submitVote: submitting to Firestore (transaction)...")
             when (val result = voteRepository.submitVote(vote)) {
                 is Resource.Success -> {
-                    // Increment candidate vote count
-                    candidateRepository.incrementVoteCount(candidateId)
+                    Log.i(TAG, "submitVote: Firestore OK — incrementing counters...")
+                    // Increment candidate vote count (fire-and-forget — non-critical)
+                    try { candidateRepository.incrementVoteCount(candidateId) } catch (e: Exception) { Log.w(TAG, "incrementVoteCount failed (non-critical)", e) }
                     // Increment election voted count
-                    electionRepository.incrementVotedCount(electionId)
+                    try { electionRepository.incrementVotedCount(electionId) } catch (e: Exception) { Log.w(TAG, "incrementVotedCount failed (non-critical)", e) }
                     // Log audit
-                    auditRepository.log(
-                        actorId = userId,
-                        actorName = sessionManager.getUserName(),
-                        actorRole = sessionManager.getUserRole()?.name ?: "",
-                        action = AuditAction.VOTE_CAST,
-                        target = electionId,
-                        targetName = candidateId
-                    )
+                    try {
+                        auditRepository.log(
+                            actorId = userId,
+                            actorName = sessionManager.getUserName(),
+                            actorRole = sessionManager.getUserRole()?.name ?: "",
+                            action = AuditAction.VOTE_CAST,
+                            target = electionId,
+                            targetName = candidateId
+                        )
+                    } catch (e: Exception) { Log.w(TAG, "audit log failed (non-critical)", e) }
+                    Log.i(TAG, "submitVote: SUCCESS! Vote cast securely.")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         isSuccess = true,
@@ -190,6 +242,7 @@ class VotingViewModel(
                     )
                 }
                 is Resource.Error -> {
+                    Log.e(TAG, "submitVote: Firestore FAILED — ${result.message}")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         error = result.message
@@ -202,5 +255,9 @@ class VotingViewModel(
 
     fun resetVoteState() {
         _voteState.value = VoteState()
+    }
+
+    fun clearVoteError() {
+        _voteState.value = _voteState.value.copy(error = null)
     }
 }

@@ -1,39 +1,45 @@
 package com.example.elsuarku.security
 
-import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import android.util.Log
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import java.security.KeyStore
+import java.util.concurrent.Executor
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Manages biometric authentication (fingerprint, face, iris) for secure voting.
  *
- * Uses AndroidX Biometric library with a crypto-backed prompt
- * to ensure the user is physically present before casting a vote.
+ * Uses AndroidX Biometric library for consistent behavior across all supported devices.
+ * Crypto-backed prompt ensures the user is physically present before casting a vote.
+ *
+ * Key features:
+ * - Automatic recovery from key invalidation (user added/removed biometrics)
+ * - Device credential fallback (PIN/pattern/password) when biometric not available
+ * - Clear Indonesian error messages for all failure modes
  */
-class BiometricPromptManager(private val context: Context) {
+class BiometricPromptManager {
 
     companion object {
         private const val BIOMETRIC_KEY_ALIAS = "elsuarku_biometric_key"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val GCM_TAG_LENGTH = 128
-        private const val GCM_IV_LENGTH = 12
+        private const val TAG = "BiometricPromptMgr"
     }
 
     /**
      * Check if the device supports biometric authentication.
+     * Uses AndroidX BiometricManager for accurate device capability detection.
      */
-    fun canAuthenticate(): BiometricResult {
-        val biometricManager = BiometricManager.from(context)
+    fun canAuthenticate(activity: FragmentActivity): BiometricResult {
+        val biometricManager = BiometricManager.from(activity)
         return when (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
             BiometricManager.BIOMETRIC_SUCCESS -> BiometricResult.Available
             BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricResult.NoHardware
@@ -46,50 +52,77 @@ class BiometricPromptManager(private val context: Context) {
 
     /**
      * Get a crypto-backed Cipher for biometric authentication.
-     * The cipher is initialized for encryption — if biometric auth succeeds,
-     * the cipher can be used to encrypt a verification token.
+     *
+     * If the key was permanently invalidated (user changed biometrics),
+     * automatically deletes the old key and creates a new one.
      */
     fun getBiometricCipher(): Cipher? {
         return try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
-            // Create key if not exists
-            if (!keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
-                val keyGenerator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_AES,
-                    ANDROID_KEYSTORE
-                )
-                keyGenerator.init(
-                    KeyGenParameterSpec.Builder(
-                        BIOMETRIC_KEY_ALIAS,
-                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                    )
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setKeySize(256)
-                        .setUserAuthenticationRequired(true)
-                        .setUserAuthenticationValidityDurationSeconds(-1) // Require auth every time
-                        .build()
-                )
-                keyGenerator.generateKey()
+            // Check if key exists and is still valid
+            if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
+                try {
+                    val secretKey = (keyStore.getEntry(BIOMETRIC_KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+                    val cipher = Cipher.getInstance(TRANSFORMATION)
+                    cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+                    return cipher
+                } catch (e: KeyPermanentlyInvalidatedException) {
+                    // Key was invalidated because user changed biometrics.
+                    // Delete old key and create a new one below.
+                    Log.w(TAG, "Biometric key permanently invalidated — recreating")
+                    keyStore.deleteEntry(BIOMETRIC_KEY_ALIAS)
+                }
             }
 
+            // Create new key
+            createNewBiometricKey()
             val secretKey = (keyStore.getEntry(BIOMETRIC_KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             cipher
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to initialize biometric cipher: ${e.message}", e)
             null
         }
     }
 
     /**
+     * Create a new biometric-backed key in the Android Keystore.
+     */
+    private fun createNewBiometricKey() {
+        val keyGenerator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES,
+            ANDROID_KEYSTORE
+        )
+        keyGenerator.init(
+            KeyGenParameterSpec.Builder(
+                BIOMETRIC_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUserAuthenticationRequired(true)
+                .setInvalidatedByBiometricEnrollment(true) // Invalidate if biometrics change
+                .build()
+        )
+        keyGenerator.generateKey()
+        Log.i(TAG, "New biometric key created successfully")
+    }
+
+    /**
      * Show the biometric prompt and call [onSuccess] on successful authentication.
      *
-     * @param activity The FragmentActivity to host the prompt
+     * Uses AndroidX BiometricPrompt which provides:
+     * - Consistent behavior across Android versions
+     * - Device credential fallback (PIN/pattern/password)
+     * - Clear error codes for all failure modes
+     *
+     * @param activity The calling Activity (required for the prompt UI)
      * @param title Title shown in the biometric dialog
      * @param subtitle Subtitle shown in the biometric dialog
+     * @param allowDeviceCredential If true, allows PIN/pattern/password as fallback
      * @param onSuccess Called when biometric auth succeeds
      * @param onError Called with a user-friendly error message when auth fails
      * @param onCancel Called when user cancels the prompt
@@ -98,51 +131,108 @@ class BiometricPromptManager(private val context: Context) {
         activity: FragmentActivity,
         title: String = "Verifikasi Biometrik",
         subtitle: String = "Konfirmasikan identitas Anda untuk melanjutkan voting",
+        allowDeviceCredential: Boolean = true,
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
         onCancel: () -> Unit = {}
     ) {
-        val cipher = getBiometricCipher()
-        if (cipher == null) {
-            onError("Gagal menginisialisasi keamanan biometrik. Coba verifikasi alternatif.")
+        // Validate activity is not finishing/destroyed
+        if (activity.isFinishing || activity.isDestroyed) {
+            onError("Aplikasi sedang ditutup. Silakan coba lagi.")
             return
         }
+
+        val cipher = getBiometricCipher()
+        if (cipher == null) {
+            onError("Gagal menginisialisasi modul keamanan biometrik. " +
+                    "Anda tetap dapat memberikan suara tanpa verifikasi biometrik.")
+            return
+        }
+
+        val executor: Executor = ContextCompat.getMainExecutor(activity)
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setNegativeButtonText("Batal")
             .setConfirmationRequired(true)
+            .apply {
+                if (allowDeviceCredential) {
+                    // Allow PIN/pattern/password as fallback for biometric
+                    setAllowedAuthenticators(
+                        BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                    )
+                } else {
+                    setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                    setNegativeButtonText("Batal")
+                }
+            }
             .build()
 
-        val biometricPrompt = BiometricPrompt(
-            activity,
-            ContextCompat.getMainExecutor(context),
+        val biometricPrompt = BiometricPrompt(activity, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    // Biometric auth succeeded — cipher is now unlocked
+                    Log.i(TAG, "Biometric authentication succeeded")
                     onSuccess()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
+                    Log.w(TAG, "Biometric error: code=$errorCode msg=$errString")
                     when (errorCode) {
-                        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                         BiometricPrompt.ERROR_USER_CANCELED,
-                        BiometricPrompt.ERROR_CANCELED -> onCancel()
-                        else -> onError("Autentikasi gagal: $errString")
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON -> {
+                            onCancel()
+                        }
+                        BiometricPrompt.ERROR_NO_BIOMETRICS -> {
+                            onError("Tidak ada biometrik terdaftar di perangkat ini. " +
+                                    "Daftarkan sidik jari atau wajah di Pengaturan > Keamanan.")
+                        }
+                        BiometricPrompt.ERROR_HW_UNAVAILABLE -> {
+                            onError("Sensor biometrik sedang tidak tersedia. " +
+                                    "Coba lagi nanti atau gunakan verifikasi alternatif.")
+                        }
+                        BiometricPrompt.ERROR_HW_NOT_PRESENT -> {
+                            onError("Perangkat ini tidak memiliki sensor biometrik. " +
+                                    "Verifikasi biometrik dilewati.")
+                        }
+                        BiometricPrompt.ERROR_LOCKOUT -> {
+                            onError("Terlalu banyak percobaan gagal. " +
+                                    "Sensor biometrik terkunci. Tunggu 30 detik atau gunakan PIN perangkat.")
+                        }
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> {
+                            onError("Sensor biometrik terkunci permanen. " +
+                                    "Buka kunci perangkat menggunakan PIN/pola, lalu coba lagi.")
+                        }
+                        BiometricPrompt.ERROR_TIMEOUT -> {
+                            onError("Waktu verifikasi habis. Silakan coba lagi.")
+                        }
+                        BiometricPrompt.ERROR_VENDOR -> {
+                            onError("Terjadi kesalahan pada sensor biometrik. Coba lagi.")
+                        }
+                        else -> {
+                            onError("Autentikasi gagal: $errString")
+                        }
                     }
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    onError("Verifikasi biometrik gagal. Coba lagi.")
+                    // Called when biometric is recognized but doesn't match.
+                    // Don't show error here — the system shows a fingerprint icon shake.
+                    // Only call onError after multiple failures (handled by ERROR_LOCKOUT above).
+                    Log.d(TAG, "Biometric authentication failed (non-fatal)")
                 }
             }
         )
 
-        biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+        try {
+            biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch biometric prompt: ${e.message}", e)
+            onError("Gagal membuka dialog biometrik: ${e.localizedMessage ?: "kesalahan sistem"}")
+        }
     }
 }
 
@@ -158,12 +248,13 @@ sealed class BiometricResult {
     data object Unknown : BiometricResult()
 
     val isAvailable: Boolean get() = this is Available
+    val isNotEnrolled: Boolean get() = this is NotEnrolled
     val userFriendlyMessage: String get() = when (this) {
         Available -> "Biometrik tersedia"
-        NoHardware -> "Perangkat tidak mendukung biometrik"
-        HardwareUnavailable -> "Sensor biometrik tidak tersedia"
-        NotEnrolled -> "Belum mendaftarkan biometrik di perangkat"
-        SecurityUpdateRequired -> "Diperlukan pembaruan keamanan"
+        NoHardware -> "Perangkat tidak memiliki sensor biometrik"
+        HardwareUnavailable -> "Sensor biometrik sedang tidak tersedia"
+        NotEnrolled -> "Belum mendaftarkan sidik jari/wajah di perangkat. Buka Pengaturan > Keamanan > Biometrik."
+        SecurityUpdateRequired -> "Diperlukan pembaruan keamanan sistem"
         Unknown -> "Status biometrik tidak diketahui"
     }
 }

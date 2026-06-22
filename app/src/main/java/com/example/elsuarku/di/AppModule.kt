@@ -44,7 +44,7 @@ class AppModule(context: Context) {
         AuthViewModel(authRepository, sessionManager, auditRepository)
 
     fun dashboardViewModel(): DashboardViewModel =
-        DashboardViewModel(electionRepository, voteRepository, sessionManager)
+        DashboardViewModel(electionRepository, voteRepository, authRepository, sessionManager)
 
     fun votingViewModel(): VotingViewModel =
         VotingViewModel(
@@ -72,6 +72,8 @@ class AppModule(context: Context) {
             electionRepository,
             voteRepository,
             auditRepository,
+            authRepository,
+            candidateRepository,
             sessionManager
         )
 }

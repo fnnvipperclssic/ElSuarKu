@@ -141,47 +141,41 @@ class AuthRepository(
     suspend fun getOrCreateUserPublic(uid: String, name: String, email: String): Resource<User> {
         return try {
             val snapshot = firestore.collection(Constants.COLLECTION_USERS)
-                .document(uid)
-                .get()
-                .await()
-
+                .document(uid).get().await()
             val existing = snapshot.toObject(User::class.java)
+            // Determine role: email pattern is authoritative for known system accounts
+            val emailRole = detectRoleFromEmail(email)
+
             if (existing != null) {
-                // Already exists — update lastLogin + name/email
+                // CORRECT role if Firestore has wrong role (e.g., from old/broken seeding)
+                val correctedRole = if (existing.role == UserRole.PEMILIH && emailRole != UserRole.PEMILIH) emailRole else existing.role
                 try {
-                    firestore.collection(Constants.COLLECTION_USERS)
-                        .document(uid)
-                        .update(mapOf("lastLogin" to System.currentTimeMillis(), "name" to name, "email" to email))
-                        .await()
+                    val updates = mutableMapOf<String, Any>("lastLogin" to System.currentTimeMillis(), "name" to name, "email" to email)
+                    if (correctedRole != existing.role) updates["role"] = correctedRole.name as String
+                    firestore.collection(Constants.COLLECTION_USERS).document(uid).update(updates).await()
                 } catch (_: Exception) { /* non-critical */ }
-                Resource.success(existing)
+                Resource.success(existing.copy(role = correctedRole))
             } else {
-                // First login — determine role from email pattern or default PEMILIH
-                val role = detectRoleFromEmail(email)
-                val user = User(uid = uid, name = name, email = email, role = role, status = UserStatus.ACTIVE, lastLogin = System.currentTimeMillis(), createdAt = System.currentTimeMillis())
-                try {
-                    firestore.collection(Constants.COLLECTION_USERS).document(uid).set(user).await()
-                } catch (_: Exception) { /* Firestore write failed but user can still login */ }
+                // First login — use email-based role detection
+                val user = User(uid = uid, name = name, email = email, role = emailRole, status = UserStatus.ACTIVE, lastLogin = System.currentTimeMillis(), createdAt = System.currentTimeMillis())
+                try { firestore.collection(Constants.COLLECTION_USERS).document(uid).set(user).await() } catch (_: Exception) {}
                 Resource.success(user)
             }
         } catch (e: Exception) {
-            // Firestore completely unavailable — create in-memory user with role from email
+            // Firestore completely unavailable — use email-based role
             val role = detectRoleFromEmail(email)
-            val user = User(uid = uid, name = name, email = email, role = role, status = UserStatus.ACTIVE, lastLogin = System.currentTimeMillis(), createdAt = System.currentTimeMillis())
-            Resource.success(user)
+            Resource.success(User(uid = uid, name = name, email = email, role = role, status = UserStatus.ACTIVE, lastLogin = System.currentTimeMillis(), createdAt = System.currentTimeMillis()))
         }
     }
 
     /**
-     * Detect user role from email pattern when Firestore is unavailable.
-     * This ensures admin/monitor accounts work even without Firestore connection.
+     * Detect user role from email pattern.
+     * admin@ → ADMIN, monitor@ → MONITOR, anything else → PEMILIH.
      */
-    private fun detectRoleFromEmail(email: String): UserRole {
-        return when {
-            email.startsWith("admin@") || email.contains("+admin") -> UserRole.ADMIN
-            email.startsWith("monitor@") || email.contains("+monitor") -> UserRole.MONITOR
-            else -> UserRole.PEMILIH
-        }
+    private fun detectRoleFromEmail(email: String): UserRole = when {
+        email.startsWith("admin@") || email.contains("+admin") -> UserRole.ADMIN
+        email.startsWith("monitor@") || email.contains("+monitor") -> UserRole.MONITOR
+        else -> UserRole.PEMILIH
     }
 
     /**
@@ -248,6 +242,37 @@ class AuthRepository(
             Resource.success(Unit)
         } catch (e: Exception) {
             Resource.error(e.localizedMessage ?: "Gagal mengubah status", e)
+        }
+    }
+
+    /**
+     * Get user's profile photo (Base64) from Firestore.
+     */
+    suspend fun getUserPhoto(uid: String): String? {
+        return try {
+            val snapshot = firestore.collection(Constants.COLLECTION_USERS)
+                .document(uid)
+                .get()
+                .await()
+            snapshot.getString("photoUrl")
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Update user's profile photo in Firestore.
+     * Returns true on success, false on failure.
+     */
+    suspend fun updateProfilePhoto(uid: String, photoBase64: String): Boolean {
+        return try {
+            firestore.collection(Constants.COLLECTION_USERS)
+                .document(uid)
+                .update("photoUrl", photoBase64)
+                .await()
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 

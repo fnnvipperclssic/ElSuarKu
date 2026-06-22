@@ -36,18 +36,20 @@ class CandidateRepository(
 
     /**
      * Get candidates for a specific election in real-time.
+     * Sorts by nomorUrut in Kotlin to avoid requiring a composite index on Firestore.
      */
     fun observeCandidates(electionId: String): Flow<Resource<List<Candidate>>> = callbackFlow {
         val listener = collection
             .whereEqualTo("electionId", electionId)
-            .whereEqualTo("status", CandidateStatus.ACTIVE.name)
-            .orderBy("nomorUrut")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     trySend(Resource.error(error.localizedMessage ?: "Gagal memuat kandidat", error))
                     return@addSnapshotListener
                 }
-                val candidates = snapshot?.toObjects(Candidate::class.java) ?: emptyList()
+                val candidates = snapshot?.toObjects(Candidate::class.java)
+                    ?.filter { it.status == CandidateStatus.ACTIVE }
+                    ?.sortedBy { it.nomorUrut }
+                    ?: emptyList()
                 trySend(Resource.success(candidates))
             }
         awaitClose { listener.remove() }
@@ -55,17 +57,21 @@ class CandidateRepository(
 
     /**
      * Get all candidates for an election (one-shot).
+     * Does NOT use orderBy — sorts by nomorUrut in Kotlin to avoid requiring
+     * a composite Firestore index on (electionId, nomorUrut).
      */
     suspend fun getCandidates(electionId: String): Resource<List<Candidate>> {
         return try {
             val snapshot = collection
                 .whereEqualTo("electionId", electionId)
-                .orderBy("nomorUrut")
                 .get()
                 .await()
-            Resource.success(snapshot.toObjects(Candidate::class.java))
+            val candidates = snapshot.toObjects(Candidate::class.java)
+                .filter { it.status == CandidateStatus.ACTIVE }
+                .sortedBy { it.nomorUrut }
+            Resource.success(candidates)
         } catch (e: Exception) {
-            Resource.error(e.localizedMessage ?: "Gagal memuat kandidat", e)
+            Resource.error(e.localizedMessage ?: "Gagal memuat kandidat. Periksa koneksi dan izin Firestore.", e)
         }
     }
 

@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.appcompat)
 
     // Lifecycle
     implementation(libs.androidx.lifecycle.runtime.ktx)

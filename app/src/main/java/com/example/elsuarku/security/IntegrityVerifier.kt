@@ -110,6 +110,14 @@ object IntegrityVerifier {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
+    /**
+     * Compute an anonymous, deterministic voter hash for duplicate-vote detection.
+     * SHA256("voter:$userId:$electionId") — irreversible but deterministic per (user, election).
+     */
+    fun computeVoterHash(userId: String, electionId: String): String {
+        return sha256("voter:$userId:$electionId")
+    }
+
     data class VoteIntegrity(
         val hash: String,
         val hmac: String,
