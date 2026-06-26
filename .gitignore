@@ -78,3 +78,24 @@ app/release/
 functions/node_modules/
 functions/lib/
 functions/.env
+
+# --- Claude Code / AI Tools ---
+.claude/
+.memory/
+CLAUDE.md
+MEMORY.md
+.playwright-mcp/
+
+# --- AI-generated documentation (jangan di-commit) ---
+ANALISIS_*.md
+CHANGELOG.md
+CONTRIBUTING.md
+PHASE_IMPLEMENTATION.md
+Panduan_*.md
+SECURITY.md
+app/ElSuarKu_Project.md
+
+# --- Screenshots & Emulator ---
+emu_*.png
+*.screenshot.png
+screenshots/
