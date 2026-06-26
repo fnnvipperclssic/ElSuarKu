@@ -1,11 +1,13 @@
 package com.example.elsuarku.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
  * Audit Log document — stored in Firestore "audit_logs" collection.
  * Records all security-relevant actions for monitoring and compliance.
  */
+@Immutable
 @Serializable
 data class AuditLog(
     val id: String = "",

@@ -220,7 +220,7 @@ private fun CandidateFormSheet(
     val existingBitmap = remember(candidate?.photoBase64) {
         candidate?.photoBase64?.takeIf { it.isNotBlank() }?.let {
             try {
-                val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                val bytes = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } catch (_: Exception) { null }
         }

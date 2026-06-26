@@ -24,6 +24,8 @@ import com.example.elsuarku.security.BiometricPromptManager
 import com.example.elsuarku.security.BiometricResult
 import com.example.elsuarku.security.SessionManager
 import com.example.elsuarku.ui.theme.*
+import androidx.fragment.app.FragmentActivity
+import com.example.elsuarku.utils.unwrapFragmentActivity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,10 +36,23 @@ fun SettingsScreen(
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = context as? androidx.fragment.app.FragmentActivity
     val biometricManager = remember { BiometricPromptManager() }
     var biometricEnabled by remember { mutableStateOf(sessionManager.isBiometricEnabled()) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+
+    // Resolve FragmentActivity dynamically — NOT via remember {}
+    // because LocalContext.current is a ContextThemeWrapper, and the first
+    // composition pass may complete before the wrapper chain is fully stable.
+    var activity by remember { mutableStateOf<FragmentActivity?>(null) }
+    LaunchedEffect(Unit) {
+        activity = context.unwrapFragmentActivity()
+    }
+
+    // Dynamic biometric availability — recomputes when activity is ready
+    var biometricResult by remember { mutableStateOf<BiometricResult?>(null) }
+    LaunchedEffect(activity) {
+        biometricResult = activity?.let { biometricManager.canAuthenticate(it) } ?: BiometricResult.Unknown
+    }
 
     Scaffold(
         topBar = {
@@ -66,28 +81,33 @@ fun SettingsScreen(
             }
 
             item {
-                val biometricResult = remember {
-                    activity?.let { biometricManager.canAuthenticate(it) } ?: BiometricResult.Unknown
-                }
+                val isAvailable = biometricResult?.isAvailable == true
+                val isNotEnrolled = biometricResult?.isNotEnrolled == true
+                val result = biometricResult
+
                 GlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
                     SettingsToggle(
                         icon = Icons.Filled.Fingerprint,
                         title = "Verifikasi Biometrik",
-                        subtitle = "Gunakan sidik jari atau face ID untuk voting",
+                        subtitle = if (isAvailable) "Sidik jari atau face ID siap digunakan"
+                                   else if (isNotEnrolled) "Belum ada biometrik terdaftar"
+                                   else "Sensor biometrik mungkin tidak tersedia",
                         checked = biometricEnabled,
-                        enabled = biometricResult.isAvailable,
+                        enabled = true, // Always allow toggling — user preference persists
                         onCheckedChange = { enabled ->
                             biometricEnabled = enabled
                             sessionManager.setBiometricEnabled(enabled)
                         }
                     )
-                    if (!biometricResult.isAvailable) {
-                        val (message, actionLabel) = when (biometricResult) {
+                    // Show hardware status only when NOT available
+                    if (result != null && !isAvailable) {
+                        val (message, actionLabel) = when (result) {
                             is BiometricResult.NotEnrolled -> "Belum ada sidik jari/wajah terdaftar di perangkat ini." to "Daftarkan"
-                            is BiometricResult.NoHardware -> "Perangkat ini tidak memiliki sensor biometrik." to null
-                            is BiometricResult.HardwareUnavailable -> "Sensor biometrik sedang tidak tersedia." to null
+                            is BiometricResult.NoHardware -> "Perangkat ini tidak memiliki sensor biometrik. Gunakan PIN/pola saat voting." to null
+                            is BiometricResult.HardwareUnavailable -> "Sensor biometrik sedang tidak tersedia. Coba lagi nanti." to null
                             is BiometricResult.SecurityUpdateRequired -> "Diperlukan pembaruan keamanan sistem." to "Pengaturan"
-                            else -> "Biometrik tidak tersedia." to null
+                            is BiometricResult.Unknown -> "Sedang memeriksa status biometrik..." to null
+                            is BiometricResult.Available -> "" to null // unreachable — isAvailable handled above
                         }
                         Row(
                             modifier = Modifier

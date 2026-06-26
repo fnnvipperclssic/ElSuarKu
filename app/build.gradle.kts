@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.google.services)
+    alias(libs.plugins.firebase.crashlytics)
 }
 
 android {
@@ -43,6 +44,27 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    // ── BuildConfig Fields ──
+    defaultConfig {
+        // Git hash (short SHA)
+        buildConfigField("String", "GIT_HASH", "\"${runCatching {
+            ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+                .directory(rootProject.projectDir)
+                .start().inputStream.bufferedReader().readText().trim()
+        }.getOrDefault("unknown")}\"")
+
+        // Build timestamp
+        buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
+
+        // Branch name
+        buildConfigField("String", "GIT_BRANCH", "\"${runCatching {
+            ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+                .directory(rootProject.projectDir)
+                .start().inputStream.bufferedReader().readText().trim()
+        }.getOrDefault("main")}\"")
     }
 }
 
@@ -77,6 +99,8 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.appcheck)
     implementation(libs.firebase.appcheck.playintegrity)
+    implementation(libs.firebase.storage)
+    implementation(libs.firebase.crashlytics)
     debugImplementation("com.google.firebase:firebase-appcheck-debug")
 
     // Google Sign-In
@@ -103,10 +127,20 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // LeakCanary — memory leak detection in debug builds
+    debugImplementation(libs.leakcanary.android)
+
+    // Vico Charts — vote result visualization
+    implementation(libs.vico.compose)
+    implementation(libs.vico.compose.m3)
 }

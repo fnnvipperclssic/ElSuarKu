@@ -46,7 +46,7 @@ fun CandidateCard(
     val bitmap = remember(candidate.photoBase64) {
         if (candidate.photoBase64.isNotBlank()) {
             try {
-                val bytes = Base64.decode(candidate.photoBase64, Base64.DEFAULT)
+                val bytes = Base64.decode(candidate.photoBase64, Base64.NO_WRAP)
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } catch (_: Exception) {
                 null

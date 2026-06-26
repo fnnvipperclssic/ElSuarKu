@@ -1,10 +1,12 @@
 package com.example.elsuarku.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
  * User document — stored in Firestore "users" collection.
  */
+@Immutable
 @Serializable
 data class User(
     val uid: String = "",

@@ -2,8 +2,10 @@ package com.example.elsuarku.data.repository
 
 import com.example.elsuarku.data.model.Election
 import com.example.elsuarku.data.model.ElectionStatus
+import com.example.elsuarku.domain.repository.IElectionRepository
 import com.example.elsuarku.utils.Constants
 import com.example.elsuarku.utils.Resource
+import com.example.elsuarku.utils.toFirestoreErrorMessage
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -15,14 +17,14 @@ import kotlinx.coroutines.tasks.await
  */
 class ElectionRepository(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
-) {
+) : IElectionRepository {
 
     private val collection = firestore.collection(Constants.COLLECTION_ELECTIONS)
 
     /**
      * Create a new election (Admin only).
      */
-    suspend fun createElection(election: Election): Resource<Election> {
+    override suspend fun createElection(election: Election): Resource<Election> {
         return try {
             val docRef = if (election.id.isBlank()) collection.document() else collection.document(election.id)
             val newElection = election.copy(id = docRef.id)
@@ -36,9 +38,9 @@ class ElectionRepository(
     /**
      * Get a single election by ID.
      */
-    suspend fun getElection(id: String): Resource<Election> {
+    override suspend fun getElection(electionId: String): Resource<Election> {
         return try {
-            val snapshot = collection.document(id).get().await()
+            val snapshot = collection.document(electionId).get().await()
             val election = snapshot.toObject(Election::class.java)
             if (election != null) Resource.success(election)
             else Resource.error("Pemilihan tidak ditemukan")
@@ -51,12 +53,12 @@ class ElectionRepository(
      * Stream active elections in real-time.
      * No composite index needed — filter ACTIVE in code.
      */
-    fun observeActiveElections(): Flow<Resource<List<Election>>> = callbackFlow {
+    override fun observeActiveElections(): Flow<Resource<List<Election>>> = callbackFlow {
         val listener = collection
             .orderBy("startDate")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(Resource.error(error.localizedMessage ?: "Gagal memuat pemilihan", error))
+                    trySend(Resource.error(error.toFirestoreErrorMessage(), error))
                     return@addSnapshotListener
                 }
                 val elections = snapshot?.toObjects(Election::class.java)
@@ -69,12 +71,12 @@ class ElectionRepository(
     /**
      * Stream all elections (for admin).
      */
-    fun observeAllElections(): Flow<Resource<List<Election>>> = callbackFlow {
+    override fun observeAllElections(): Flow<Resource<List<Election>>> = callbackFlow {
         val listener = collection
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(Resource.error(error.localizedMessage ?: "Gagal memuat pemilihan", error))
+                    trySend(Resource.error(error.toFirestoreErrorMessage(), error))
                     return@addSnapshotListener
                 }
                 val elections = snapshot?.toObjects(Election::class.java) ?: emptyList()
@@ -85,26 +87,23 @@ class ElectionRepository(
 
     /**
      * Get all active elections as a one-shot query.
-     * No composite index needed — filter ACTIVE in code.
+     * Includes both DRAFT and ACTIVE statuses for the monitor dashboard.
      */
-    suspend fun getActiveElections(): Resource<List<Election>> {
+    override suspend fun getActiveElections(): Resource<List<Election>> {
         return try {
             val snapshot = collection
-                .orderBy("startDate")
-                .get()
-                .await()
-            val elections = snapshot.toObjects(Election::class.java)
-                .filter { it.status == ElectionStatus.ACTIVE }
-            Resource.success(elections)
+                .whereIn("status", listOf(ElectionStatus.DRAFT.name, ElectionStatus.ACTIVE.name))
+                .get().await()
+            Resource.success(snapshot.toObjects(Election::class.java))
         } catch (e: Exception) {
-            Resource.error(e.localizedMessage ?: "Gagal memuat pemilihan", e)
+            Resource.error(e.localizedMessage ?: "Gagal mengambil pemilihan aktif", e)
         }
     }
 
     /**
      * Get ALL elections regardless of status (Admin view).
      */
-    suspend fun getAllElections(): Resource<List<Election>> {
+    override suspend fun getAllElections(): Resource<List<Election>> {
         return try {
             val snapshot = collection
                 .orderBy("startDate")
@@ -119,13 +118,21 @@ class ElectionRepository(
 
     /**
      * Update an election (Admin only).
+     * Uses partial update() — preserves votedCount, totalVoters, createdAt,
+     * and other fields that must never be reset by an edit operation.
      */
-    suspend fun updateElection(election: Election): Resource<Unit> {
+    override suspend fun updateElection(election: Election): Resource<Election> {
         return try {
-            collection.document(election.id)
-                .set(election.copy(updatedAt = System.currentTimeMillis()))
-                .await()
-            Resource.success(Unit)
+            val updates = mapOf(
+                "title" to election.title,
+                "description" to election.description,
+                "startDate" to election.startDate,
+                "endDate" to election.endDate,
+                "status" to election.status.name,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            collection.document(election.id).update(updates).await()
+            Resource.success(election)
         } catch (e: Exception) {
             Resource.error(e.localizedMessage ?: "Gagal memperbarui pemilihan", e)
         }
@@ -134,9 +141,9 @@ class ElectionRepository(
     /**
      * Update election status.
      */
-    suspend fun updateElectionStatus(id: String, status: ElectionStatus): Resource<Unit> {
+    override suspend fun updateElectionStatus(electionId: String, status: ElectionStatus): Resource<Unit> {
         return try {
-            collection.document(id).update(
+            collection.document(electionId).update(
                 mapOf(
                     "status" to status.name,
                     "updatedAt" to System.currentTimeMillis()
@@ -151,9 +158,9 @@ class ElectionRepository(
     /**
      * Delete an election (Admin only).
      */
-    suspend fun deleteElection(id: String): Resource<Unit> {
+    override suspend fun deleteElection(electionId: String): Resource<Unit> {
         return try {
-            collection.document(id).delete().await()
+            collection.document(electionId).delete().await()
             Resource.success(Unit)
         } catch (e: Exception) {
             Resource.error(e.localizedMessage ?: "Gagal menghapus pemilihan", e)
@@ -161,9 +168,21 @@ class ElectionRepository(
     }
 
     /**
+     * Get total election count across all statuses.
+     */
+    override suspend fun getElectionCount(): Resource<Int> {
+        return try {
+            val snapshot = collection.get().await()
+            Resource.success(snapshot.size())
+        } catch (e: Exception) {
+            Resource.error(e.localizedMessage ?: "Gagal menghitung pemilihan", e)
+        }
+    }
+
+    /**
      * Increment the voted count for an election.
      */
-    suspend fun incrementVotedCount(electionId: String): Resource<Unit> {
+    override suspend fun incrementVotedCount(electionId: String): Resource<Unit> {
         return try {
             collection.document(electionId)
                 .update("votedCount", com.google.firebase.firestore.FieldValue.increment(1))

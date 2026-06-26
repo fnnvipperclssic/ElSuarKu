@@ -1,27 +1,44 @@
 package com.example.elsuarku.presentation.admin
 
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.elsuarku.data.model.*
-import com.example.elsuarku.data.repository.*
+import com.example.elsuarku.data.repository.AuthRepository
+import com.example.elsuarku.data.repository.ImageStorage
+import com.example.elsuarku.domain.repository.IAuditRepository
+import com.example.elsuarku.domain.repository.IAuthRepository
+import com.example.elsuarku.domain.repository.ICandidateRepository
+import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IVoteRepository
 import com.example.elsuarku.security.InputSanitizer
 import com.example.elsuarku.security.SessionManager
 import com.example.elsuarku.utils.Resource
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.launch
 
 class AdminViewModel(
-    private val electionRepository: ElectionRepository,
-    private val candidateRepository: CandidateRepository,
-    private val voteRepository: VoteRepository,
-    private val auditRepository: AuditRepository,
-    private val authRepository: AuthRepository,
+    private val electionRepository: IElectionRepository,
+    private val candidateRepository: ICandidateRepository,
+    private val voteRepository: IVoteRepository,
+    private val auditRepository: IAuditRepository,
+    private val authRepository: IAuthRepository,
     private val imageStorage: ImageStorage,
     private val sessionManager: SessionManager
 ) : ViewModel() {
+    companion object {
+        private const val TAG = "AdminViewModel"
+    }
 
     // === Admin State ===
     data class AdminState(
@@ -56,94 +73,142 @@ class AdminViewModel(
     val userId get() = sessionManager.getUserId() ?: ""
     private val userName get() = sessionManager.getUserName()
     private val userRole get() = sessionManager.getUserRole()?.name ?: "ADMIN"
+    private val authRepo get() = authRepository as AuthRepository
+
+    // ── Real-time observer jobs ──
+    private var electionsJob: Job? = null
+    private var usersJob: Job? = null
+    private var securityJob: Job? = null
+    private var recomputeJob: Job? = null
+    private var observing = false
 
     init {
-        _state.value = _state.value.copy(adminName = sessionManager.getUserName())
-        loadAllData()
+        // ONLY set identity info. Do NOT load data — user may not be logged in yet
+        // (ViewModel is created at NavGraph level, before login).
+        _state.value = _state.value.copy(
+            adminName = sessionManager.getUserName(),
+            isLoading = false
+        )
+    }
+
+    // ==================== REAL-TIME OBSERVERS ====================
+
+    /**
+     * Start Firestore snapshot listeners for elections, users, and security logs.
+     * Stats are recomputed whenever elections or users data changes.
+     */
+    private fun startRealTimeObservers() {
+        _state.value = _state.value.copy(isLoading = true, error = null)
+
+        electionsJob = viewModelScope.launch {
+            electionRepository.observeAllElections().cancellable().collect { result ->
+                when (result) {
+                    is Resource.Success -> {
+                        val elections = result.data
+                        var totalCandidates = 0
+                        for (election in elections) {
+                            when (val cr = candidateRepository.getCandidates(election.id)) {
+                                is Resource.Success -> totalCandidates += cr.data.size
+                                else -> {}
+                            }
+                        }
+                        _state.value = _state.value.copy(
+                            elections = elections,
+                            totalElections = elections.size,
+                            totalCandidates = totalCandidates,
+                            isLoading = false,
+                            error = null
+                        )
+                        recomputeStats()
+                    }
+                    is Resource.Error -> {
+                        _state.value = _state.value.copy(
+                            isLoading = false,
+                            error = result.message
+                        )
+                    }
+                    is Resource.Loading -> { /* no-op */ }
+                    is Resource.Cached<*> -> { /* no-op */ }
+                    is Resource.Empty -> { /* no-op */ }
+                }
+            }
+        }
+
+        usersJob = viewModelScope.launch {
+            authRepository.observeAllUsers().cancellable().collect { result ->
+                when (result) {
+                    is Resource.Success -> {
+                        _state.value = _state.value.copy(
+                            users = result.data,
+                            totalVoters = result.data.size
+                        )
+                        recomputeStats()
+                    }
+                    else -> { /* keep stale data on error */ }
+                }
+            }
+        }
+
+        securityJob = viewModelScope.launch {
+            auditRepository.observeRecentLogs(100).cancellable().collect { result ->
+                when (result) {
+                    is Resource.Success -> {
+                        _state.value = _state.value.copy(securityAlerts = result.data)
+                    }
+                    else -> { /* keep stale data */ }
+                }
+            }
+        }
+    }
+
+    /**
+     * Recompute participation rate whenever voter count or vote count changes.
+     * Cancels any in-flight recompute to prevent race conditions when both
+     * elections and users observers fire in quick succession.
+     */
+    private fun recomputeStats() {
+        recomputeJob?.cancel()
+        recomputeJob = viewModelScope.launch {
+            when (val r = voteRepository.getTotalVotesCount()) {
+                is Resource.Success -> {
+                    val votes = r.data
+                    val voters = _state.value.totalVoters
+                    _state.value = _state.value.copy(
+                        totalVotes = votes,
+                        participationRate = if (voters > 0) votes.toFloat() / voters * 100f else 0f
+                    )
+                }
+                else -> {}
+            }
+        }
     }
 
     // ==================== DATA LOADING ====================
 
+    /**
+     * Load all data via real-time observers. Called from screen composable
+     * via LaunchedEffect (first composition) and from "Coba Lagi" / refresh buttons.
+     * Safe to call multiple times — starts observers on first call, skips subsequent calls.
+     */
     fun loadAllData() {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, error = null)
-            try {
-                loadElections()
-                loadUsers()
-                loadStats()
-                loadSecurityAlerts()
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(error = "Gagal memuat data: ${e.localizedMessage ?: "kesalahan tidak diketahui"}")
-            } finally {
-                _state.value = _state.value.copy(isLoading = false)
-            }
-        }
-    }
-
-    private suspend fun loadElections() {
-        when (val r = electionRepository.getAllElections()) {
-            is Resource.Success -> {
-                // Load total candidates across all elections
-                var totalCandidates = 0
-                for (election in r.data) {
-                    when (val cr = candidateRepository.getCandidates(election.id)) {
-                        is Resource.Success -> totalCandidates += cr.data.size
-                        else -> {}
-                    }
-                }
-                _state.value = _state.value.copy(
-                    elections = r.data,
-                    totalElections = r.data.size,
-                    totalCandidates = totalCandidates
-                )
-            }
-            is Resource.Error -> _state.value = _state.value.copy(error = r.message)
-            else -> {}
-        }
-    }
-
-    private suspend fun loadUsers() {
-        when (val r = authRepository.getAllUsers()) {
-            is Resource.Success -> {
-                _state.value = _state.value.copy(users = r.data, totalVoters = r.data.size)
-            }
-            else -> {}
-        }
-    }
-
-    private suspend fun loadStats() {
-        when (val r = voteRepository.getTotalVotesCount()) {
-            is Resource.Success -> {
-                val votes = r.data
-                val voters = _state.value.totalVoters
-                _state.value = _state.value.copy(
-                    totalVotes = votes,
-                    participationRate = if (voters > 0) votes.toFloat() / voters * 100f else 0f
-                )
-            }
-            else -> {}
-        }
-    }
-
-    private suspend fun loadSecurityAlerts() {
-        var critical: List<AuditLog> = emptyList()
-        var warnings: List<AuditLog> = emptyList()
-        var info: List<AuditLog> = emptyList()
-
-        when (val r = auditRepository.getLogsBySeverity(AuditSeverity.CRITICAL, 30)) {
-            is Resource.Success -> critical = r.data
-            else -> {}
-        }
-        when (val r = auditRepository.getLogsBySeverity(AuditSeverity.WARNING, 30)) {
-            is Resource.Success -> warnings = r.data
-            else -> {}
-        }
-        when (val r = auditRepository.getLogsBySeverity(AuditSeverity.INFO, 30)) {
-            is Resource.Success -> info = r.data
-            else -> {}
+        val userId = sessionManager.getUserId()
+        if (userId == null) {
+            _state.value = _state.value.copy(isLoading = false, error = "Sesi tidak valid. Silakan login ulang.")
+            return
         }
 
-        _state.value = _state.value.copy(securityAlerts = critical + warnings + info)
+        if (!observing) {
+            observing = true
+            startRealTimeObservers()
+        } else {
+            // Force-reload: cancel and restart all observers for a fresh snapshot
+            electionsJob?.cancel()
+            usersJob?.cancel()
+            securityJob?.cancel()
+            observing = false
+            startRealTimeObservers()
+            observing = true
+        }
     }
 
     // ==================== ELECTION MANAGEMENT ====================
@@ -160,7 +225,7 @@ class AdminViewModel(
                 is Resource.Success -> {
                     auditRepository.log(userId, userName, userRole, AuditAction.ELECTION_CREATED, r.data.id, title)
                     _state.value = _state.value.copy(isLoading = false, successMessage = "Pemilihan berhasil dibuat")
-                    loadAllData()
+                    // Real-time observer auto-picks up the new election
                 }
                 is Resource.Error -> _state.value = _state.value.copy(isLoading = false, error = r.message)
                 else -> {}
@@ -179,7 +244,6 @@ class AdminViewModel(
                 is Resource.Success -> {
                     auditRepository.log(userId, userName, userRole, AuditAction.ELECTION_UPDATED, electionId, title)
                     _state.value = _state.value.copy(isLoading = false, successMessage = "Pemilihan berhasil diperbarui")
-                    loadAllData()
                 }
                 is Resource.Error -> _state.value = _state.value.copy(isLoading = false, error = r.message)
                 else -> {}
@@ -193,7 +257,6 @@ class AdminViewModel(
                 is Resource.Success -> {
                     auditRepository.log(userId, userName, userRole, AuditAction.ELECTION_UPDATED, electionId)
                     _state.value = _state.value.copy(successMessage = "Status pemilihan diperbarui")
-                    loadAllData()
                 }
                 is Resource.Error -> _state.value = _state.value.copy(error = r.message)
                 else -> {}
@@ -207,7 +270,6 @@ class AdminViewModel(
                 is Resource.Success -> {
                     auditRepository.log(userId, userName, userRole, AuditAction.ELECTION_DELETED, electionId)
                     _state.value = _state.value.copy(successMessage = "Pemilihan dihapus")
-                    loadAllData()
                 }
                 is Resource.Error -> _state.value = _state.value.copy(error = r.message)
                 else -> {}
@@ -319,11 +381,11 @@ class AdminViewModel(
 
     fun updateUserRole(uid: String, newRole: UserRole) {
         viewModelScope.launch {
-            when (val r = authRepository.updateUserRole(uid, newRole)) {
+            when (val r = authRepo.updateUserRole(uid, newRole)) {
                 is Resource.Success -> {
                     auditRepository.log(userId, userName, userRole, AuditAction.USER_ACTIVATED, uid, "Role: $newRole")
                     _state.value = _state.value.copy(successMessage = "Role pengguna diperbarui")
-                    loadUsers()
+                    // Real-time observer auto-picks up the role change
                 }
                 is Resource.Error -> _state.value = _state.value.copy(error = r.message)
                 else -> {}
@@ -333,12 +395,11 @@ class AdminViewModel(
 
     fun updateUserStatus(uid: String, status: UserStatus) {
         viewModelScope.launch {
-            when (val r = authRepository.updateUserStatus(uid, status)) {
+            when (val r = authRepo.updateUserStatus(uid, status)) {
                 is Resource.Success -> {
                     val action = if (status == UserStatus.SUSPENDED) AuditAction.USER_SUSPENDED else AuditAction.USER_ACTIVATED
                     auditRepository.log(userId, userName, userRole, action, uid)
                     _state.value = _state.value.copy(successMessage = "Status pengguna diperbarui")
-                    loadUsers()
                 }
                 is Resource.Error -> _state.value = _state.value.copy(error = r.message)
                 else -> {}
@@ -348,9 +409,18 @@ class AdminViewModel(
 
     // ==================== REPORT ====================
 
-    fun getElectionReport(electionId: String): String {
+    /**
+     * Quick report preview from cached data. Use [generateReportText] for exports.
+     */
+    fun getElectionReportPreview(electionId: String): String {
         val election = _state.value.elections.find { it.id == electionId } ?: return "Pemilihan tidak ditemukan"
-        val candidates = _state.value.candidates
+        val candidates = _state.value.candidates.ifEmpty {
+            return "Muat kandidat terlebih dahulu — pilih pemilihan di menu Kandidat"
+        }
+        return buildReportString(election, candidates)
+    }
+
+    private fun buildReportString(election: Election, candidates: List<Candidate>): String {
         val sb = StringBuilder()
         sb.appendLine("===== LAPORAN PEMILIHAN =====")
         sb.appendLine("Judul: ${election.title}")
@@ -367,7 +437,97 @@ class AdminViewModel(
         return sb.toString()
     }
 
-    fun exportReport(electionId: String): String = getElectionReport(electionId)
+    /**
+     * Generate an accurate election report by loading FRESH candidate data
+     * with current vote counts directly from Firestore.
+     */
+    suspend fun generateReportText(electionId: String): String {
+        val election = _state.value.elections.find { it.id == electionId }
+            ?: return "Pemilihan tidak ditemukan"
+        val result = candidateRepository.getCandidates(electionId)
+        val candidates = result.getOrNull()
+            ?: return result.errorOrNull() ?: "Gagal memuat data kandidat"
+        return buildReportString(election, candidates)
+    }
+
+    /** Export report as plain text — loads fresh data from Firestore. */
+    suspend fun exportReport(electionId: String): String = generateReportText(electionId)
+
+    /**
+     * Generate a PDF report of the election results using Android's PdfDocument API.
+     * Loads fresh candidate data with current vote counts.
+     * Saves to app cache directory and returns the file path, or null on failure.
+     */
+    suspend fun generatePdfReport(context: Context, electionId: String): String? {
+        val reportText = generateReportText(electionId)
+        if (reportText.isBlank()) return null
+
+        return try {
+            val document = PdfDocument()
+            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4
+            val page = document.startPage(pageInfo)
+            val canvas: Canvas = page.canvas
+
+            val titlePaint = Paint().apply {
+                color = Color.DKGRAY
+                textSize = 20f
+                isFakeBoldText = true
+            }
+            val bodyPaint = Paint().apply {
+                color = Color.DKGRAY
+                textSize = 12f
+            }
+
+            var y = 40f
+            val margin = 40f
+            val pageWidth = 595f
+            val lineHeight = 18f
+
+            // Draw title
+            canvas.drawText("Laporan Pemilihan", pageWidth / 2f - 60f, y, titlePaint)
+            y += lineHeight * 2
+
+            // Draw body text with line wrapping
+            val lines = reportText.lines()
+            for (line in lines) {
+                if (line.isBlank()) {
+                    y += lineHeight * 0.5f
+                    continue
+                }
+                // Simple word wrap for long lines
+                val words = line.split(" ")
+                val sb = StringBuilder()
+                for (word in words) {
+                    val testLine = if (sb.isEmpty()) word else "$sb $word"
+                    if (bodyPaint.measureText(testLine) > pageWidth - margin * 2) {
+                        canvas.drawText(sb.toString(), margin, y, bodyPaint)
+                        y += lineHeight
+                        sb.clear()
+                    }
+                    if (sb.isNotEmpty()) sb.append(" ")
+                    sb.append(word)
+                }
+                if (sb.isNotEmpty()) {
+                    canvas.drawText(sb.toString(), margin, y, bodyPaint)
+                    y += lineHeight
+                }
+            }
+
+            document.finishPage(page)
+
+            // Save to cache directory
+            val fileName = "report_${electionId}_${System.currentTimeMillis()}.pdf"
+            val file = java.io.File(context.cacheDir, fileName)
+            document.writeTo(java.io.FileOutputStream(file))
+            document.close()
+
+            Log.d(TAG, "PDF report saved to: ${file.absolutePath}")
+            file.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to generate PDF report", e)
+            null
+        }
+    }
 
     // ==================== UTILITY ====================
 

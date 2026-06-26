@@ -133,7 +133,7 @@ class EncryptionManager {
     @Throws(Exception::class)
     private fun createKeySoftware(alias: String): SecretKey {
         // If a previous key attempt left a broken entry, delete it
-        try { keyStore.deleteEntry(alias) } catch (_: Exception) {}
+        try { keyStore.deleteEntry(alias) } catch (e: Exception) { Log.w(TAG, "Failed to delete key alias: $alias", e) }
 
         val keyGenerator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES,

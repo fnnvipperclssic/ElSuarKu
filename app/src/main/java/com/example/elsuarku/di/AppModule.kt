@@ -7,6 +7,11 @@ import com.example.elsuarku.data.repository.CandidateRepository
 import com.example.elsuarku.data.repository.ElectionRepository
 import com.example.elsuarku.data.repository.ImageStorage
 import com.example.elsuarku.data.repository.VoteRepository
+import com.example.elsuarku.domain.repository.IAuditRepository
+import com.example.elsuarku.domain.repository.IAuthRepository
+import com.example.elsuarku.domain.repository.ICandidateRepository
+import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IVoteRepository
 import com.example.elsuarku.presentation.admin.AdminViewModel
 import com.example.elsuarku.presentation.auth.AuthViewModel
 import com.example.elsuarku.presentation.dashboard.DashboardViewModel
@@ -14,12 +19,14 @@ import com.example.elsuarku.presentation.monitor.MonitorViewModel
 import com.example.elsuarku.presentation.voting.VotingViewModel
 import com.example.elsuarku.security.AntiTampering
 import com.example.elsuarku.security.EncryptionManager
+import com.example.elsuarku.security.PinManager
 import com.example.elsuarku.security.SessionManager
 
 /**
  * Manual dependency injection module.
  *
- * Provides all singleton instances. In a larger app, consider using Hilt or Koin.
+ * Wires interfaces → concrete implementations for testability and DIP compliance.
+ * In a larger app, consider using Hilt or Koin.
  * For ElSuarKu, manual DI keeps things explicit and avoids annotation processing overhead.
  */
 class AppModule(context: Context) {
@@ -28,20 +35,21 @@ class AppModule(context: Context) {
     val sessionManager = SessionManager(context)
     val encryptionManager = EncryptionManager()
     val antiTampering = AntiTampering(context)
+    val pinManager = PinManager(context)
 
     // ---- Storage ----
     val imageStorage = ImageStorage(context)
 
-    // ---- Repositories ----
-    val authRepository = AuthRepository()
-    val electionRepository = ElectionRepository()
-    val candidateRepository = CandidateRepository()
-    val voteRepository = VoteRepository()
-    val auditRepository = AuditRepository()
+    // ---- Repositories (wired via interfaces for testability) ----
+    val authRepository: IAuthRepository by lazy { AuthRepository() }
+    val electionRepository: IElectionRepository by lazy { ElectionRepository() }
+    val candidateRepository: ICandidateRepository by lazy { CandidateRepository() }
+    val voteRepository: IVoteRepository by lazy { VoteRepository() }
+    val auditRepository: IAuditRepository by lazy { AuditRepository() }
 
     // ---- ViewModels (factory methods — new instance per call) ----
     fun authViewModel(): AuthViewModel =
-        AuthViewModel(authRepository, sessionManager, auditRepository)
+        AuthViewModel(authRepository, sessionManager, auditRepository, pinManager)
 
     fun dashboardViewModel(): DashboardViewModel =
         DashboardViewModel(electionRepository, voteRepository, authRepository, sessionManager)

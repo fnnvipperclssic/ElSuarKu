@@ -21,7 +21,10 @@ import com.example.elsuarku.data.model.AuditSeverity
 import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
 import com.example.elsuarku.presentation.components.PulseDot
+import com.example.elsuarku.security.KeyAttestationVerifier
+import com.example.elsuarku.security.SslInterceptionDetector
 import com.example.elsuarku.ui.theme.*
+import com.example.elsuarku.utils.Constants
 import com.example.elsuarku.utils.toFormattedDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,6 +97,119 @@ fun SecurityCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                         }
                     }
 
+                    // ── Security Diagnostics ──
+                    item {
+                        val attestationReport = remember {
+                            runCatching {
+                                KeyAttestationVerifier.verifyKeyAttestation(Constants.KEY_ALIAS)
+                            }.getOrNull()
+                        }
+                        val sslResult = remember {
+                            runCatching {
+                                SslInterceptionDetector.checkForInterception()
+                            }.getOrNull()
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Diagnostik Keamanan",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = DeepBlueDark
+                            )
+
+                            // Key Attestation Card
+                            GlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val attestSecure = attestationReport?.isSecure == true
+                                    Icon(
+                                        Icons.Filled.Key,
+                                        null,
+                                        tint = if (attestSecure) EmeraldGreen else StatusError,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (attestSecure) "Key Attestation: Hardware-Backed"
+                                            else "Key Attestation: Not Verified",
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                            color = DeepBlueDark
+                                        )
+                                        if (attestationReport != null) {
+                                            val bootLabel = when (attestationReport.verifiedBootState) {
+                                                KeyAttestationVerifier.AttestationReport.BootState.VERIFIED -> "Verified Boot ✓"
+                                                KeyAttestationVerifier.AttestationReport.BootState.SELF_SIGNED -> "Self-Signed Boot ⚠"
+                                                KeyAttestationVerifier.AttestationReport.BootState.UNVERIFIED -> "Unverified Boot ✗"
+                                                KeyAttestationVerifier.AttestationReport.BootState.FAILED -> "Boot State: FAILED ✗"
+                                            }
+                                            Text(
+                                                "$bootLabel · StrongBox: ${if (attestationReport.isStrongBox) "Yes" else "No"} · TEE: ${if (attestationReport.isTeeEnforced) "Yes" else "No"}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = DeepBlueLight
+                                            )
+                                        } else {
+                                            Text(
+                                                "Tidak dapat memverifikasi — pastikan device mendukung hardware keystore",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = DeepBlueLight
+                                            )
+                                        }
+                                    }
+                                    Surface(
+                                        color = (if (attestSecure) EmeraldGreen else StatusError).copy(alpha = 0.1f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            if (attestSecure) "AMAN" else "⚠",
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (attestSecure) EmeraldGreen else StatusError
+                                        )
+                                    }
+                                }
+                            }
+
+                            // SSL Interception Card
+                            GlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val sslClean = sslResult == SslInterceptionDetector.Result.CLEAN
+                                    Icon(
+                                        Icons.Filled.Lock,
+                                        null,
+                                        tint = if (sslClean) EmeraldGreen else StatusWarning,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (sslClean) "SSL/TLS: Aman"
+                                            else "SSL/TLS: ${sslResult?.name ?: "Unknown"}",
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                            color = DeepBlueDark
+                                        )
+                                        Text(
+                                            if (sslClean) "Tidak ada user CA certificate atau proxy terdeteksi"
+                                            else "Potensi SSL interception terdeteksi — periksa certificate store device",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = DeepBlueLight
+                                        )
+                                    }
+                                    Surface(
+                                        color = (if (sslClean) EmeraldGreen else StatusWarning).copy(alpha = 0.1f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            if (sslClean) "AMAN" else "⚠",
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (sslClean) EmeraldGreen else StatusWarning
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Alerts list
                     item {
                         Row(
@@ -116,7 +232,20 @@ fun SecurityCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                         }
                     }
 
-                    if (state.securityAlerts.isEmpty() && !state.isLoading) {
+                    if (state.error != null) {
+                        item {
+                            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Filled.Error, null, tint = StatusError, modifier = Modifier.size(48.dp))
+                                    Spacer(Modifier.height(12.dp))
+                                    Text("Gagal Memuat Data", style = MaterialTheme.typography.titleMedium, color = StatusError, fontWeight = FontWeight.SemiBold)
+                                    Text(state.error ?: "Terjadi kesalahan", style = MaterialTheme.typography.bodySmall, color = DeepBlueLight)
+                                    Spacer(Modifier.height(16.dp))
+                                    OutlinedButton(onClick = { viewModel.loadAllData() }) { Text("Coba Lagi") }
+                                }
+                            }
+                        }
+                    } else if (state.securityAlerts.isEmpty() && !state.isLoading) {
                         item {
                             GlassCard(modifier = Modifier.fillMaxWidth()) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

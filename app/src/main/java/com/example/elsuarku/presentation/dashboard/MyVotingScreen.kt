@@ -96,7 +96,7 @@ fun MyVotingScreen(viewModel: DashboardViewModel, onBack: () -> Unit) {
                     // Show only elections that have voting history data (voted + all),
                     // NOT active elections which includes un-voted ones
                     val historyElections = state.allElections
-                        .filter { it.id in state.votedElectionIds || state.allElections.isNotEmpty() }
+                        .filter { it.id in state.votedElectionIds }
                         .ifEmpty { state.activeElections.filter { it.id in state.votedElectionIds } }
                     if (historyElections.isEmpty()) {
                         item {

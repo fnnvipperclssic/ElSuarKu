@@ -1,10 +1,12 @@
 package com.example.elsuarku.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
  * Election document — stored in Firestore "elections" collection.
  */
+@Immutable
 @Serializable
 data class Election(
     val id: String = "",

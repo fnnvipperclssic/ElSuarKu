@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
+import android.util.Log
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -23,6 +24,10 @@ import java.io.InputStreamReader
  * Root and hook framework detection always run (actual security threats).
  */
 class AntiTampering(private val context: Context) {
+
+    companion object {
+        private const val TAG = "AntiTampering"
+    }
 
     private val isDebugBuild: Boolean by lazy {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -122,6 +127,7 @@ class AntiTampering(private val context: Context) {
             context.packageManager.getPackageInfo("com.noshufou.android.su", PackageManager.GET_ACTIVITIES)
             true
         } catch (_: Exception) {
+            Log.d(TAG, "Check 1 (Superuser APK) not found — normal non-root device")
             false
         }
     }
@@ -134,7 +140,8 @@ class AntiTampering(private val context: Context) {
             reader.close()
             process.destroy()
             line != null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "Check 2 (su binary) not found — normal non-root device")
             false
         }
     }
@@ -149,7 +156,8 @@ class AntiTampering(private val context: Context) {
             process.destroy()
             // ro.debuggable = 1 or ro.secure = 0 indicates root
             output.contains("[ro.debuggable]: [1]") || output.contains("[ro.secure]: [0]")
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "Check 3 (dangerous properties) — cannot read props on non-root device")
             false
         }
     }
@@ -166,6 +174,7 @@ class AntiTampering(private val context: Context) {
                 .loadClass("de.robv.android.xposed.XposedBridge")
             true
         } catch (_: ClassNotFoundException) {
+            Log.d(TAG, "Check 4 (Xposed) — XposedBridge class not found, normal device")
             // Also check for Xposed files
             File("/data/data/de.robv.android.xposed.installer").exists() ||
                     File("/data/local/xposed").exists()
@@ -176,7 +185,8 @@ class AntiTampering(private val context: Context) {
         // Frida injects its library into the process
         return try {
             System.getProperty("os.arch")?.contains("frida") == true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "Check 5 (Frida) — os.arch check clean, normal device")
             // Check for Frida server on device
             File("/data/local/tmp/frida-server").exists() ||
                     File("/data/local/tmp/re.frida.server").exists()

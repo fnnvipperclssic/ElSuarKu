@@ -55,6 +55,9 @@ class BiometricPromptManager {
      *
      * If the key was permanently invalidated (user changed biometrics),
      * automatically deletes the old key and creates a new one.
+     *
+     * Returns null if the device has no enrolled biometrics — the caller
+     * should fall back to device-credential-only (PIN/password) authentication.
      */
     fun getBiometricCipher(): Cipher? {
         return try {
@@ -68,8 +71,6 @@ class BiometricPromptManager {
                     cipher.init(Cipher.ENCRYPT_MODE, secretKey)
                     return cipher
                 } catch (e: KeyPermanentlyInvalidatedException) {
-                    // Key was invalidated because user changed biometrics.
-                    // Delete old key and create a new one below.
                     Log.w(TAG, "Biometric key permanently invalidated — recreating")
                     keyStore.deleteEntry(BIOMETRIC_KEY_ALIAS)
                 }
@@ -81,6 +82,14 @@ class BiometricPromptManager {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             cipher
+        } catch (e: java.security.InvalidAlgorithmParameterException) {
+            // No biometric enrolled — key generation fails on emulator/devices without biometrics
+            Log.w(TAG, "Biometric key not available (no biometric enrolled): ${e.message}")
+            null
+        } catch (e: java.lang.IllegalStateException) {
+            // Emulator or device without any biometric enrollment
+            Log.w(TAG, "Biometric key not available: ${e.message}")
+            null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize biometric cipher: ${e.message}", e)
             null
@@ -143,10 +152,19 @@ class BiometricPromptManager {
         }
 
         val cipher = getBiometricCipher()
-        if (cipher == null) {
+        val useCrypto = cipher != null
+
+        // If no cipher and device credential fallback is NOT allowed → hard error
+        if (!useCrypto && !allowDeviceCredential) {
             onError("Gagal menginisialisasi modul keamanan biometrik. " +
-                    "Anda tetap dapat memberikan suara tanpa verifikasi biometrik.")
+                    "Pastikan sidik jari/wajah sudah terdaftar di Pengaturan > Keamanan.")
             return
+        }
+
+        // If no cipher but device credential IS allowed → non-crypto prompt (PIN/pattern/password)
+        // This covers emulator and devices without biometric enrollment.
+        if (!useCrypto && allowDeviceCredential) {
+            Log.w(TAG, "Biometric cipher unavailable — falling back to device credential only")
         }
 
         val executor: Executor = ContextCompat.getMainExecutor(activity)
@@ -156,15 +174,17 @@ class BiometricPromptManager {
             .setSubtitle(subtitle)
             .setConfirmationRequired(true)
             .apply {
-                if (allowDeviceCredential) {
-                    // Allow PIN/pattern/password as fallback for biometric
+                if (useCrypto) {
+                    // Crypto-backed: require biometric STRONG, allow device credential fallback
                     setAllowedAuthenticators(
                         BiometricManager.Authenticators.BIOMETRIC_STRONG or
                                 BiometricManager.Authenticators.DEVICE_CREDENTIAL
                     )
                 } else {
-                    setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                    setNegativeButtonText("Batal")
+                    // No biometric key available — device credential only
+                    setAllowedAuthenticators(BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                    setTitle("Verifikasi Perangkat")
+                    setSubtitle("Konfirmasikan PIN/pola/sandi perangkat Anda untuk melanjutkan")
                 }
             }
             .build()
@@ -173,7 +193,7 @@ class BiometricPromptManager {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    Log.i(TAG, "Biometric authentication succeeded")
+                    Log.i(TAG, "Biometric/device authentication succeeded (crypto=${result.cryptoObject != null})")
                     onSuccess()
                 }
 
@@ -186,8 +206,14 @@ class BiometricPromptManager {
                             onCancel()
                         }
                         BiometricPrompt.ERROR_NO_BIOMETRICS -> {
-                            onError("Tidak ada biometrik terdaftar di perangkat ini. " +
-                                    "Daftarkan sidik jari atau wajah di Pengaturan > Keamanan.")
+                            if (allowDeviceCredential) {
+                                // Should not happen when DEVICE_CREDENTIAL is set, but handle gracefully
+                                onError("Verifikasi biometrik tidak tersedia. " +
+                                        "Gunakan PIN/pola/sandi perangkat untuk melanjutkan.")
+                            } else {
+                                onError("Tidak ada biometrik terdaftar di perangkat ini. " +
+                                        "Daftarkan sidik jari atau wajah di Pengaturan > Keamanan.")
+                            }
                         }
                         BiometricPrompt.ERROR_HW_UNAVAILABLE -> {
                             onError("Sensor biometrik sedang tidak tersedia. " +
@@ -195,7 +221,7 @@ class BiometricPromptManager {
                         }
                         BiometricPrompt.ERROR_HW_NOT_PRESENT -> {
                             onError("Perangkat ini tidak memiliki sensor biometrik. " +
-                                    "Verifikasi biometrik dilewati.")
+                                    "Gunakan PIN/pola/sandi perangkat untuk verifikasi.")
                         }
                         BiometricPrompt.ERROR_LOCKOUT -> {
                             onError("Terlalu banyak percobaan gagal. " +
@@ -219,16 +245,17 @@ class BiometricPromptManager {
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    // Called when biometric is recognized but doesn't match.
-                    // Don't show error here — the system shows a fingerprint icon shake.
-                    // Only call onError after multiple failures (handled by ERROR_LOCKOUT above).
                     Log.d(TAG, "Biometric authentication failed (non-fatal)")
                 }
             }
         )
 
         try {
-            biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+            if (useCrypto && cipher != null) {
+                biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+            } else {
+                biometricPrompt.authenticate(promptInfo)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch biometric prompt: ${e.message}", e)
             onError("Gagal membuka dialog biometrik: ${e.localizedMessage ?: "kesalahan sistem"}")

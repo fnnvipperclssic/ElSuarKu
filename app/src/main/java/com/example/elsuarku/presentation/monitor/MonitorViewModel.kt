@@ -7,11 +7,11 @@ import com.example.elsuarku.data.model.AuditLog
 import com.example.elsuarku.data.model.AuditSeverity
 import com.example.elsuarku.data.model.Candidate
 import com.example.elsuarku.data.model.Election
-import com.example.elsuarku.data.repository.AuditRepository
-import com.example.elsuarku.data.repository.AuthRepository
-import com.example.elsuarku.data.repository.CandidateRepository
-import com.example.elsuarku.data.repository.ElectionRepository
-import com.example.elsuarku.data.repository.VoteRepository
+import com.example.elsuarku.domain.repository.IAuditRepository
+import com.example.elsuarku.domain.repository.IAuthRepository
+import com.example.elsuarku.domain.repository.ICandidateRepository
+import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IVoteRepository
 import com.example.elsuarku.security.SessionManager
 import com.example.elsuarku.utils.Resource
 import kotlinx.coroutines.async
@@ -22,11 +22,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class MonitorViewModel(
-    private val electionRepository: ElectionRepository,
-    private val voteRepository: VoteRepository,
-    private val auditRepository: AuditRepository,
-    private val authRepository: AuthRepository,
-    private val candidateRepository: CandidateRepository,
+    private val electionRepository: IElectionRepository,
+    private val voteRepository: IVoteRepository,
+    private val auditRepository: IAuditRepository,
+    private val authRepository: IAuthRepository,
+    private val candidateRepository: ICandidateRepository,
     private val sessionManager: SessionManager
 ) : ViewModel() {
 
@@ -53,8 +53,20 @@ class MonitorViewModel(
 
     init {
         _state.value = _state.value.copy(monitorName = sessionManager.getUserName())
-        viewModelScope.launch { loadMonitorDataInternal() }
-        observeAuditLogs()
+        // Only load data if user has a valid session AND is actually a MONITOR or ADMIN.
+        // PEMILIH users have sessions too, but they must not trigger MONITOR-level queries
+        // (audit_logs read is restricted to ADMIN/MONITOR in Firestore rules → PERMISSION_DENIED).
+        val role = sessionManager.getUserRole()
+        val userId = sessionManager.getUserId()
+        if (userId != null && (role == com.example.elsuarku.data.model.UserRole.MONITOR || role == com.example.elsuarku.data.model.UserRole.ADMIN)) {
+            viewModelScope.launch { loadMonitorDataInternal() }
+            observeAuditLogs()
+        } else {
+            _state.value = _state.value.copy(
+                isLoading = false,
+                error = if (userId == null) "Tidak ada sesi. Silakan login ulang." else null
+            )
+        }
     }
 
     /** Suspend body of monitor data load — reusable by init and refresh(). */
@@ -77,19 +89,25 @@ class MonitorViewModel(
             when (val er = electionsDeferred.await()) {
                 is Resource.Success -> _state.value = _state.value.copy(elections = er.data)
                 is Resource.Error -> errors.add("Pemilihan: ${er.message}")
-                else -> {}
+                is Resource.Loading -> {}
+                is Resource.Empty -> {}
+                is Resource.Cached -> {}
             }
 
             when (val vr = votesDeferred.await()) {
                 is Resource.Success -> _state.value = _state.value.copy(totalVotes = vr.data)
                 is Resource.Error -> errors.add("Suara: ${vr.message}")
-                else -> {}
+                is Resource.Loading -> {}
+                is Resource.Empty -> {}
+                is Resource.Cached -> {}
             }
 
             when (val ur = usersDeferred.await()) {
                 is Resource.Success -> _state.value = _state.value.copy(totalUsers = ur.data.size)
                 is Resource.Error -> errors.add("Pengguna: ${ur.message}")
-                else -> {}
+                is Resource.Loading -> {}
+                is Resource.Empty -> {}
+                is Resource.Cached -> {}
             }
         }
 
@@ -146,7 +164,9 @@ class MonitorViewModel(
         when (val result = candidateRepository.getCandidates(electionId)) {
             is Resource.Success -> _state.value = _state.value.copy(candidates = result.data)
             is Resource.Error -> errors.add(result.message)
-            else -> {}
+            is Resource.Loading -> {}
+            is Resource.Empty -> {}
+            is Resource.Cached -> {}
         }
 
         _state.value = _state.value.copy(
@@ -168,7 +188,9 @@ class MonitorViewModel(
                 Log.w(TAG, "Gagal memuat log CRITICAL: ${result.message}")
                 alertErrors.add("Critical: ${result.message}")
             }
-            else -> {}
+            is Resource.Loading -> {}
+            is Resource.Empty -> {}
+            is Resource.Cached -> {}
         }
 
         when (val result = auditRepository.getLogsBySeverity(AuditSeverity.WARNING, 50)) {
@@ -177,7 +199,9 @@ class MonitorViewModel(
                 Log.w(TAG, "Gagal memuat log WARNING: ${result.message}")
                 alertErrors.add("Warning: ${result.message}")
             }
-            else -> {}
+            is Resource.Loading -> {}
+            is Resource.Empty -> {}
+            is Resource.Cached -> {}
         }
 
         when (val result = auditRepository.getLogsBySeverity(AuditSeverity.INFO, 50)) {
@@ -186,7 +210,9 @@ class MonitorViewModel(
                 Log.w(TAG, "Gagal memuat log INFO: ${result.message}")
                 alertErrors.add("Info: ${result.message}")
             }
-            else -> {}
+            is Resource.Loading -> {}
+            is Resource.Empty -> {}
+            is Resource.Cached -> {}
         }
 
         _state.value = _state.value.copy(

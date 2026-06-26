@@ -3,8 +3,10 @@ package com.example.elsuarku.data.repository
 import com.example.elsuarku.data.model.AuditAction
 import com.example.elsuarku.data.model.AuditLog
 import com.example.elsuarku.data.model.AuditSeverity
+import com.example.elsuarku.domain.repository.IAuditRepository
 import com.example.elsuarku.utils.Constants
 import com.example.elsuarku.utils.Resource
+import com.example.elsuarku.utils.toFirestoreErrorMessage
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -16,14 +18,38 @@ import kotlinx.coroutines.tasks.await
  */
 class AuditRepository(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
-) {
+) : IAuditRepository {
 
     private val collection = firestore.collection(Constants.COLLECTION_AUDIT_LOGS)
 
     /**
-     * Write an audit log entry.
+     * Write an audit log entry (interface-compliant version).
      */
-    suspend fun log(
+    override suspend fun log(
+        actorId: String,
+        actorName: String?,
+        actorRole: String,
+        action: AuditAction,
+        target: String,
+        targetName: String,
+        detail: String
+    ): Resource<Unit> {
+        return logInternal(
+            actorId = actorId,
+            actorName = actorName ?: "",
+            actorRole = actorRole,
+            action = action,
+            target = target,
+            targetName = targetName,
+            metadata = if (detail.isNotBlank()) mapOf("detail" to detail) else emptyMap(),
+            severity = AuditSeverity.INFO
+        )
+    }
+
+    /**
+     * Write an audit log entry (internal version with full params).
+     */
+    suspend fun logInternal(
         actorId: String,
         actorName: String,
         actorRole: String,
@@ -57,13 +83,13 @@ class AuditRepository(
     /**
      * Stream audit logs in real-time (for Monitor dashboard).
      */
-    fun observeRecentLogs(limit: Long = 100): Flow<Resource<List<AuditLog>>> = callbackFlow {
+    override fun observeRecentLogs(limit: Long): Flow<Resource<List<AuditLog>>> = callbackFlow {
         val listener = collection
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(limit)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(Resource.error(error.localizedMessage ?: "Gagal memuat log", error))
+                    trySend(Resource.error(error.toFirestoreErrorMessage(), error))
                     return@addSnapshotListener
                 }
                 val logs = snapshot?.toObjects(AuditLog::class.java) ?: emptyList()
@@ -75,11 +101,11 @@ class AuditRepository(
     /**
      * Get logs for a specific date range (for reports).
      */
-    suspend fun getLogsInRange(startTime: Long, endTime: Long): Resource<List<AuditLog>> {
+    override suspend fun getLogsInRange(start: Long, end: Long): Resource<List<AuditLog>> {
         return try {
             val snapshot = collection
-                .whereGreaterThanOrEqualTo("timestamp", startTime)
-                .whereLessThanOrEqualTo("timestamp", endTime)
+                .whereGreaterThanOrEqualTo("timestamp", start)
+                .whereLessThanOrEqualTo("timestamp", end)
                 .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .get()
                 .await()
@@ -92,12 +118,12 @@ class AuditRepository(
     /**
      * Get logs filtered by severity (for security monitoring).
      */
-    suspend fun getLogsBySeverity(severity: AuditSeverity, limit: Long = 50): Resource<List<AuditLog>> {
+    override suspend fun getLogsBySeverity(severity: AuditSeverity, limit: Int): Resource<List<AuditLog>> {
         return try {
             val snapshot = collection
                 .whereEqualTo("severity", severity.name)
                 .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .limit(limit)
+                .limit(limit.toLong())
                 .get()
                 .await()
             Resource.success(snapshot.toObjects(AuditLog::class.java))

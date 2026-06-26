@@ -3,21 +3,25 @@ package com.example.elsuarku.presentation.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.elsuarku.data.model.Election
-import com.example.elsuarku.data.repository.AuthRepository
-import com.example.elsuarku.data.repository.ElectionRepository
-import com.example.elsuarku.data.repository.VoteRepository
+import com.example.elsuarku.domain.repository.IAuthRepository
+import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IVoteRepository
 import com.example.elsuarku.security.IntegrityVerifier
 import com.example.elsuarku.security.SessionManager
 import com.example.elsuarku.utils.Resource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DashboardViewModel(
-    private val electionRepository: ElectionRepository,
-    private val voteRepository: VoteRepository,
-    private val authRepository: AuthRepository,
+    private val electionRepository: IElectionRepository,
+    private val voteRepository: IVoteRepository,
+    private val authRepository: IAuthRepository,
     private val sessionManager: SessionManager
 ) : ViewModel() {
 
@@ -31,89 +35,158 @@ class DashboardViewModel(
         val error: String? = null
     )
 
+    companion object { private const val TAG = "DashboardVM" }
+
     private val _state = MutableStateFlow(UserDashboardState())
     val state: StateFlow<UserDashboardState> = _state.asStateFlow()
 
+    private var voteStatusJob: Job? = null
+    private var historyLoaded = false
+    private var observing = false
+
     init {
-        _state.value = _state.value.copy(
-            userName = sessionManager.getUserName(),
-            userEmail = sessionManager.getUserEmail()
-        )
-        loadDashboard()
+        val uid = sessionManager.getUserId()
+        val name = sessionManager.getUserName()
+        android.util.Log.d(TAG, "init: userId=$uid name=$name")
+
+        if (uid != null) {
+            // User is logged in — show name/email while data loads
+            _state.value = _state.value.copy(
+                userName = name,
+                userEmail = sessionManager.getUserEmail(),
+                isLoading = true  // stay loading until loadDashboard() resolves
+            )
+        } else {
+            // No active session — keep loading, let loadDashboard() surface the error
+            _state.value = _state.value.copy(
+                userName = "",
+                userEmail = "",
+                isLoading = true
+            )
+        }
     }
 
+    /**
+     * Start real-time observers if not already running.
+     * Called from screen composable via LaunchedEffect.
+     */
     fun loadDashboard(forceReload: Boolean = false) {
-        val shouldLoadElections = forceReload || _state.value.activeElections.isEmpty()
+        val userId = sessionManager.getUserId()
+        android.util.Log.d(TAG, "loadDashboard: userId=$userId forceReload=$forceReload observing=$observing")
+        if (userId == null) {
+            android.util.Log.w(TAG, "loadDashboard: userId is NULL — session invalid!")
+            _state.value = _state.value.copy(isLoading = false, error = "Sesi tidak valid. Silakan login ulang.")
+            return
+        }
 
+        if (observing && !forceReload) {
+            android.util.Log.d(TAG, "loadDashboard: already observing, skip")
+            return
+        }
+        observing = true
+
+        _state.value = _state.value.copy(isLoading = true, error = null)
+        android.util.Log.d(TAG, "loadDashboard: starting real-time observers")
+
+        // ── Real-time: observe active elections via Firestore snapshot listener ──
         viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, error = null)
-
-            if (shouldLoadElections) {
-                // Load active elections
-                when (val result = electionRepository.getActiveElections()) {
+            electionRepository.observeActiveElections().collect { result ->
+                when (result) {
                     is Resource.Success -> {
-                        _state.value = _state.value.copy(activeElections = result.data)
+                        val elections = result.data
+                        _state.value = _state.value.copy(
+                            activeElections = elections,
+                            isLoading = false,
+                            error = null
+                        )
+                        observeVoteStatus(userId, elections)
+
+                        if (!historyLoaded) {
+                            historyLoaded = true
+                            loadAllElectionsHistory(userId)
+                        }
                     }
                     is Resource.Error -> {
                         _state.value = _state.value.copy(
                             isLoading = false,
                             error = result.message
                         )
-                        return@launch
                     }
-                    is Resource.Loading -> {}
+                    is Resource.Loading -> { /* no-op */ }
+                    is Resource.Empty -> { /* no-op */ }
+                    is Resource.Cached -> {
+                        _state.value = _state.value.copy(
+                            activeElections = result.data,
+                            isLoading = false
+                        )
+                    }
                 }
             }
-
-            // Always refresh voted election IDs — voting status can change between visits
-            checkVotedElections(_state.value.activeElections)
         }
     }
 
     /**
-     * Check which elections the user has voted in.
-     * Uses anonymous voterHash (SHA-256 of userId:electionId) — no plaintext PII in queries.
+     * Real-time observer for vote status across the given elections.
+     * Cancels the previous observation and starts a new one scoped to the
+     * current list of election IDs.
      */
-    private suspend fun checkVotedElections(activeElections: List<Election>) {
-        val userId = sessionManager.getUserId()
-        if (userId == null) {
-            _state.value = _state.value.copy(isLoading = false, error = "Sesi tidak valid. Silakan login ulang.")
-            return
-        }
-        val votedIds = mutableSetOf<String>()
-
-        // Check active elections using anonymous voterHash
-        for (election in activeElections) {
-            val voterHash = IntegrityVerifier.computeVoterHash(userId, election.id)
-            when (val result = voteRepository.checkUserHasVoted(voterHash, election.id)) {
-                is Resource.Success -> { if (result.data) votedIds.add(election.id) }
-                else -> {}
-            }
-        }
-
-        // Also load ALL elections to catch votes in completed elections
-        var allElections: List<Election> = emptyList()
-        when (val allResult = electionRepository.getAllElections()) {
-            is Resource.Success -> {
-                allElections = allResult.data
-                for (election in allResult.data) {
-                    if (election.id !in activeElections.map { it.id }) {
-                        val voterHash = IntegrityVerifier.computeVoterHash(userId, election.id)
-                        when (val result = voteRepository.checkUserHasVoted(voterHash, election.id)) {
-                            is Resource.Success -> { if (result.data) votedIds.add(election.id) }
-                            else -> {}
+    private fun observeVoteStatus(userId: String, elections: List<Election>) {
+        voteStatusJob?.cancel()
+        if (elections.isEmpty()) return
+        val electionIds = elections.map { it.id }
+        voteStatusJob = viewModelScope.launch {
+            voteRepository
+                .observeUserVoteStatus(userId, electionIds)
+                .collect { result ->
+                    when (result) {
+                        is Resource.Success -> {
+                            // Merge real-time voted IDs with any history-only voted IDs
+                            val historyVoted = _state.value.votedElectionIds
+                                .filter { it !in electionIds }
+                                .toSet()
+                            _state.value = _state.value.copy(
+                                votedElectionIds = result.data + historyVoted
+                            )
                         }
+                        else -> { /* keep stale data on error */ }
                     }
                 }
-            }
-            else -> {}
         }
+    }
 
-        _state.value = _state.value.copy(
-            votedElectionIds = votedIds,
-            allElections = allElections,
-            isLoading = false
-        )
+    /**
+     * One-shot load of ALL elections (including completed/cancelled) for voting history.
+     * Uses parallel coroutines with Dispatchers.IO for batch vote-status checking.
+     */
+    private suspend fun loadAllElectionsHistory(userId: String) {
+        when (val allResult = electionRepository.getAllElections()) {
+            is Resource.Success -> {
+                val allElections = allResult.data
+                val activeIds = _state.value.activeElections.map { it.id }.toSet()
+                val historyElections = allElections.filter { it.id !in activeIds }
+
+                // Check voted status for elections NOT in active list — parallel IO
+                val historyVotedIds = if (historyElections.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        historyElections.map { election ->
+                            async {
+                                val voterHash = IntegrityVerifier.computeVoterHash(userId, election.id)
+                                when (val vr = voteRepository.checkUserHasVoted(voterHash, election.id)) {
+                                    is Resource.Success -> if (vr.data) election.id else null
+                                    else -> null
+                                }
+                            }
+                        }.mapNotNull { it.await() }.toSet()
+                    }
+                } else emptySet()
+
+                _state.value = _state.value.copy(
+                    allElections = allElections,
+                    votedElectionIds = _state.value.votedElectionIds + historyVotedIds
+                )
+            }
+            else -> { /* keep whatever we have */ }
+        }
     }
 
     fun refreshSession() {

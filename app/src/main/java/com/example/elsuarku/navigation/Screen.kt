@@ -4,6 +4,7 @@ sealed class Screen(val route: String) {
     // Auth
     data object Login : Screen("login")
     data object Register : Screen("register")
+    data object SetupPin : Screen("setup_pin")
 
     // ===== USER (PEMILIH) =====
     data object UserHome : Screen("user_home")

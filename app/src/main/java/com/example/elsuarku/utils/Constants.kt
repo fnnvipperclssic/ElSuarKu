@@ -20,10 +20,13 @@ object Constants {
     const val PREF_USER_EMAIL = "user_email"
     const val PREF_LAST_LOGIN = "last_login"
     const val PREF_BIOMETRIC_ENABLED = "biometric_enabled"
+    const val PREF_DEVICE_FINGERPRINT = "device_fingerprint"
+    const val PREF_LAST_ACTIVITY = "last_activity"
 
     // Security
-    const val SESSION_TIMEOUT_MINUTES = 30L
+    const val SESSION_TIMEOUT_MINUTES = 5L    // Reduced from 30 — e-voting requires short sessions
     const val MAX_LOGIN_ATTEMPTS = 5
+    const val MAX_VOTE_ATTEMPTS_PER_MINUTE = 3
     const val ENCRYPTION_ALGORITHM = "AES/GCM/NoPadding"
     const val KEY_ALIAS = "elsuarku_master_key"
 

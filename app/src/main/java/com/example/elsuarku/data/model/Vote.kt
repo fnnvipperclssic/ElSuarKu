@@ -1,5 +1,6 @@
 package com.example.elsuarku.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
@@ -16,6 +17,7 @@ import kotlinx.serialization.Serializable
  *
  * No plaintext userId or candidateId is stored outside the encrypted blob.
  */
+@Immutable
 @Serializable
 data class Vote(
     val id: String = "",
@@ -25,5 +27,20 @@ data class Vote(
     val hash: String = "",                    // SHA-256 integrity hash
     val hmac: String = "",                    // HMAC-SHA256 tamper-detection signature
     val timestamp: Long = 0L,
-    val verificationToken: String = ""        // Unique receipt token for voter verification
+    val verificationToken: String = "",       // Unique receipt token for voter verification
+    val reconciliationStatus: ReconciliationStatus = ReconciliationStatus.CONFIRMED
 )
+
+/**
+ * Status of vote reconciliation after two-phase commit.
+ *
+ * - CONFIRMED: Vote written AND all counters incremented successfully
+ * - PENDING_RECONCILIATION: Vote written but counters may be inconsistent
+ * - RECONCILED: Counters were fixed by background reconciliation job
+ */
+@Serializable
+enum class ReconciliationStatus {
+    CONFIRMED,
+    PENDING_RECONCILIATION,
+    RECONCILED
+}

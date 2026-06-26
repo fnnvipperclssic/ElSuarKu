@@ -59,7 +59,16 @@ fun ElSuarKuNavGraph(navController: NavHostController, authViewModel: AuthViewMo
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 },
-                onNavigateToRegister = { navController.navigate(Screen.Register.route) }
+                onNavigateToRegister = { navController.navigate(Screen.Register.route) },
+                pinManager = appModule.pinManager,
+                onNavigateToSetupPin = { navController.navigate(Screen.SetupPin.route) }
+            )
+        }
+        composable(Screen.SetupPin.route) {
+            SetupPinScreen(
+                pinManager = appModule.pinManager,
+                onPinSetupSuccess = { navController.popBackStack() },
+                onBack = { navController.popBackStack() }
             )
         }
         composable(Screen.Register.route) {

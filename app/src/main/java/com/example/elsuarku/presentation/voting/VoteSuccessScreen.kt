@@ -1,5 +1,6 @@
 package com.example.elsuarku.presentation.voting
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,6 +82,11 @@ fun VoteSuccessScreen(
         animationSpec = tween(400, easing = FastOutSlowInEasing),
         label = "btnOffset"
     )
+
+    // Block system back button from returning to VoteConfirmation
+    BackHandler(enabled = true) {
+        onBackToDashboard()
+    }
 
     LaunchedEffect(Unit) {
         phase1 = true
@@ -205,6 +212,26 @@ fun VoteSuccessScreen(
                         "Suara Anda tidak dapat diubah",
                         style = MaterialTheme.typography.labelSmall,
                         color = Gold.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            // Biometric verification badge
+            if (voteState?.value?.biometricVerified == true) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(EmeraldGreen.copy(alpha = 0.1f))
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                ) {
+                    Icon(Icons.Filled.Fingerprint, null, tint = EmeraldGreen, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Terverifikasi Biometrik",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = EmeraldGreen
                     )
                 }
             }

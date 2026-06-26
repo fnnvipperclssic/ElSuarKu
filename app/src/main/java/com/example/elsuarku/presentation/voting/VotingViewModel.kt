@@ -7,27 +7,30 @@ import com.example.elsuarku.data.model.AuditAction
 import com.example.elsuarku.data.model.Candidate
 import com.example.elsuarku.data.model.Election
 import com.example.elsuarku.data.model.ElectionStatus
+import com.example.elsuarku.data.model.ReconciliationStatus
 import com.example.elsuarku.data.model.Vote
-import com.example.elsuarku.data.repository.AuditRepository
-import com.example.elsuarku.data.repository.CandidateRepository
-import com.example.elsuarku.data.repository.ElectionRepository
-import com.example.elsuarku.data.repository.VoteRepository
+import com.example.elsuarku.domain.repository.IAuditRepository
+import com.example.elsuarku.domain.repository.ICandidateRepository
+import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IVoteRepository
 import com.example.elsuarku.security.EncryptionManager
 import com.example.elsuarku.security.IntegrityVerifier
 import com.example.elsuarku.security.SessionManager
 import com.example.elsuarku.utils.Resource
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.launch
 
 class VotingViewModel(
-    private val electionRepository: ElectionRepository,
-    private val candidateRepository: CandidateRepository,
-    private val voteRepository: VoteRepository,
+    private val electionRepository: IElectionRepository,
+    private val candidateRepository: ICandidateRepository,
+    private val voteRepository: IVoteRepository,
     private val encryptionManager: EncryptionManager,
     private val sessionManager: SessionManager,
-    private val auditRepository: AuditRepository
+    private val auditRepository: IAuditRepository
 ) : ViewModel() {
 
     data class ElectionListState(
@@ -49,7 +52,8 @@ class VotingViewModel(
         val isSubmitting: Boolean = false,
         val isSuccess: Boolean = false,
         val error: String? = null,
-        val verificationToken: String? = null
+        val verificationToken: String? = null,
+        val biometricVerified: Boolean = false
     )
 
     private val _electionListState = MutableStateFlow(ElectionListState())
@@ -63,31 +67,46 @@ class VotingViewModel(
 
     companion object { private const val TAG = "VotingViewModel" }
 
+    private var electionsJob: Job? = null
+    private var candidatesJob: Job? = null
+
+    /**
+     * Start observing active elections in real-time via Firestore snapshot listener.
+     * Idempotent — safe to call multiple times (e.g. from LaunchedEffect on recomposition).
+     */
     fun loadElections() {
-        viewModelScope.launch {
-            _electionListState.value = ElectionListState(isLoading = true)
-            when (val result = electionRepository.getActiveElections()) {
-                is Resource.Success -> {
-                    _electionListState.value = ElectionListState(
-                        elections = result.data,
-                        isLoading = false
-                    )
+        if (electionsJob?.isActive == true) return
+        electionsJob = viewModelScope.launch {
+            electionRepository.observeActiveElections().cancellable().collect { result ->
+                when (result) {
+                    is Resource.Success -> {
+                        _electionListState.value = ElectionListState(
+                            elections = result.data,
+                            isLoading = false
+                        )
+                    }
+                    is Resource.Error -> {
+                        _electionListState.value = ElectionListState(
+                            isLoading = false,
+                            error = result.message
+                        )
+                    }
+                    is Resource.Loading -> {}
+                    is Resource.Empty -> {}
+                    is Resource.Cached -> {}
                 }
-                is Resource.Error -> {
-                    _electionListState.value = ElectionListState(
-                        isLoading = false,
-                        error = result.message
-                    )
-                }
-                is Resource.Loading -> {}
             }
         }
     }
 
+    /**
+     * Observe candidates for a specific election in real-time.
+     * Cancels any previous candidate observation before starting a new one.
+     */
     fun loadCandidates(electionId: String) {
-        viewModelScope.launch {
-            _candidateListState.value = CandidateListState(isLoading = true)
-            // Load election details
+        candidatesJob?.cancel()
+        candidatesJob = viewModelScope.launch {
+            // Election details (one-shot — election metadata rarely changes)
             when (val electionResult = electionRepository.getElection(electionId)) {
                 is Resource.Success -> {
                     _candidateListState.value = _candidateListState.value.copy(
@@ -96,22 +115,27 @@ class VotingViewModel(
                 }
                 else -> {}
             }
-            // Load candidates
-            when (val result = candidateRepository.getCandidates(electionId)) {
-                is Resource.Success -> {
-                    _candidateListState.value = CandidateListState(
-                        election = _candidateListState.value.election,
-                        candidates = result.data,
-                        isLoading = false
-                    )
+
+            // Real-time candidate list via Firestore snapshot listener
+            candidateRepository.observeCandidates(electionId).cancellable().collect { result ->
+                when (result) {
+                    is Resource.Success -> {
+                        _candidateListState.value = CandidateListState(
+                            election = _candidateListState.value.election,
+                            candidates = result.data,
+                            isLoading = false
+                        )
+                    }
+                    is Resource.Error -> {
+                        _candidateListState.value = CandidateListState(
+                            isLoading = false,
+                            error = result.message
+                        )
+                    }
+                    is Resource.Loading -> {}
+                    is Resource.Empty -> {}
+                    is Resource.Cached -> {}
                 }
-                is Resource.Error -> {
-                    _candidateListState.value = CandidateListState(
-                        isLoading = false,
-                        error = result.message
-                    )
-                }
-                is Resource.Loading -> {}
             }
         }
     }
@@ -159,7 +183,7 @@ class VotingViewModel(
                     return@launch
                 }
                 if (System.currentTimeMillis() > election.endDate) {
-                    Log.w(TAG, "submitVote: REJECTED — election expired (endDate=${election.endDate})")
+                    Log.w(TAG, "submitVote: REJECTED — election expired")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         error = "Pemilihan sudah berakhir"
@@ -167,7 +191,7 @@ class VotingViewModel(
                     return@launch
                 }
                 if (System.currentTimeMillis() < election.startDate) {
-                    Log.w(TAG, "submitVote: REJECTED — election not yet started (startDate=${election.startDate})")
+                    Log.w(TAG, "submitVote: REJECTED — election not yet started")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         error = "Pemilihan belum dimulai"
@@ -177,7 +201,7 @@ class VotingViewModel(
             }
             Log.d(TAG, "submitVote: election validation OK")
 
-            // Compute anonymous voter hash (S2: no plaintext userId in Firestore)
+            // Compute anonymous voter hash
             val voterHash = IntegrityVerifier.computeVoterHash(userId, electionId)
             Log.d(TAG, "submitVote: voterHash=${voterHash.take(8)}...")
 
@@ -189,14 +213,11 @@ class VotingViewModel(
             try {
                 val timestamp = System.currentTimeMillis()
                 val voteData = "vote:$userId:$electionId:$candidateId:$timestamp"
-                Log.d(TAG, "submitVote: encrypting vote data...")
                 encryptedData = encryptionManager.encrypt(voteData)
-                Log.d(TAG, "submitVote: encryption OK — generating integrity signature...")
                 val integrity = IntegrityVerifier.generateVoteSignature(userId, electionId, candidateId, timestamp)
                 hash = integrity.hash
-                hmac = integrity.hmac  // S3: HMAC now persisted in Vote model
+                hmac = integrity.hmac
                 verificationToken = integrity.verificationToken
-                Log.d(TAG, "submitVote: integrity OK — token=${verificationToken.take(8)}...")
             } catch (e: Exception) {
                 Log.e(TAG, "submitVote: encryption/integrity FAILED", e)
                 _voteState.value = _voteState.value.copy(
@@ -212,18 +233,54 @@ class VotingViewModel(
                 encryptedVoteData = encryptedData,
                 hash = hash,
                 hmac = hmac,
-                verificationToken = verificationToken
+                verificationToken = verificationToken,
+                reconciliationStatus = ReconciliationStatus.PENDING_RECONCILIATION
             )
 
-            Log.d(TAG, "submitVote: submitting to Firestore (transaction)...")
+            // ── TWO-PHASE COMMIT ──
+            // Phase 1: Atomically write the vote document (prevents double-voting)
+            Log.d(TAG, "submitVote: PHASE 1 — atomic vote write via transaction...")
             when (val result = voteRepository.submitVote(vote)) {
                 is Resource.Success -> {
-                    Log.i(TAG, "submitVote: Firestore OK — incrementing counters...")
-                    // Increment candidate vote count (fire-and-forget — non-critical)
-                    try { candidateRepository.incrementVoteCount(candidateId) } catch (e: Exception) { Log.w(TAG, "incrementVoteCount failed (non-critical)", e) }
-                    // Increment election voted count
-                    try { electionRepository.incrementVotedCount(electionId) } catch (e: Exception) { Log.w(TAG, "incrementVotedCount failed (non-critical)", e) }
-                    // Log audit
+                    Log.i(TAG, "submitVote: PHASE 1 OK — vote persisted")
+
+                    // Phase 2a: Increment candidate counter (critical)
+                    val candidateOk = try {
+                        candidateRepository.incrementVoteCount(candidateId)
+                        true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "submitVote: PHASE 2a FAILED — candidate counter", e)
+                        false
+                    }
+
+                    // Phase 2b: Increment election counter (critical)
+                    val electionOk = try {
+                        electionRepository.incrementVotedCount(electionId)
+                        true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "submitVote: PHASE 2b FAILED — election counter", e)
+                        false
+                    }
+
+                    // If both counters succeeded, mark vote CONFIRMED
+                    if (candidateOk && electionOk) {
+                        Log.i(TAG, "submitVote: PHASE 2 OK — all counters synced")
+                        // Update reconciliation status to CONFIRMED
+                        // (fire-and-forget — vote is already safe)
+                        try {
+                            voteRepository.updateReconciliationStatus(
+                                voterHash, electionId,
+                                ReconciliationStatus.CONFIRMED
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to update reconciliation status", e)
+                        }
+                    } else {
+                        // Vote is saved but counters inconsistent — needs reconciliation
+                        Log.w(TAG, "submitVote: PHASE 2 PARTIAL — vote saved, counters need reconciliation")
+                    }
+
+                    // Phase 3: Audit log (non-critical, fire-and-forget)
                     try {
                         auditRepository.log(
                             actorId = userId,
@@ -231,9 +288,16 @@ class VotingViewModel(
                             actorRole = sessionManager.getUserRole()?.name ?: "",
                             action = AuditAction.VOTE_CAST,
                             target = electionId,
-                            targetName = candidateId
+                            targetName = candidateId,
+                            detail = "reconciliation=${if (candidateOk && electionOk) "CONFIRMED" else "PENDING"}"
                         )
-                    } catch (e: Exception) { Log.w(TAG, "audit log failed (non-critical)", e) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "audit log failed (non-critical)", e)
+                    }
+
+                    // Clear step-up auth — needs fresh auth for next vote
+                    sessionManager.clearStepUpAuth()
+
                     Log.i(TAG, "submitVote: SUCCESS! Vote cast securely.")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
@@ -242,19 +306,25 @@ class VotingViewModel(
                     )
                 }
                 is Resource.Error -> {
-                    Log.e(TAG, "submitVote: Firestore FAILED — ${result.message}")
+                    Log.e(TAG, "submitVote: PHASE 1 FAILED — ${result.message}")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         error = result.message
                     )
                 }
                 is Resource.Loading -> {}
+                is Resource.Empty -> {}
+                is Resource.Cached -> {}
             }
         }
     }
 
     fun resetVoteState() {
         _voteState.value = VoteState()
+    }
+
+    fun setBiometricVerified() {
+        _voteState.value = _voteState.value.copy(biometricVerified = true)
     }
 
     fun clearVoteError() {

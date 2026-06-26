@@ -1,11 +1,13 @@
 package com.example.elsuarku.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
  * Candidate document — stored in Firestore "candidates" collection.
  * Photo is stored as Base64 string (free alternative to Firebase Storage).
  */
+@Immutable
 @Serializable
 data class Candidate(
     val id: String = "",

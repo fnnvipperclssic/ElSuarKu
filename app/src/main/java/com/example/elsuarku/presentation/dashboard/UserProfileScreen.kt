@@ -158,7 +158,7 @@ fun UserProfileScreen(
                     value = photoBase64?.let { b64 ->
                         try {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                val bytes = Base64.decode(b64, Base64.NO_WRAP)
                                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             }
                         } catch (_: Exception) { null }

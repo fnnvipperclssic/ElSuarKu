@@ -40,6 +40,9 @@ fun AdminDashboardScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // Trigger data loading when screen first composes.
+    // ViewModel.init does NOT load data — it only sets identity info.
+    // Subsequent calls are no-ops (observers already running).
     LaunchedEffect(Unit) { viewModel.loadAllData() }
 
     Scaffold(

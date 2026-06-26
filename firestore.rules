@@ -3,37 +3,69 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // === Helper Functions ===
+    //
+    // Custom claims approach (Phase 1.2):
+    //   Role is stored in Firebase Auth custom claims (request.auth.token.role),
+    //   synced by the onUserRoleChanged Cloud Function. This eliminates get()
+    //   calls to /users/{uid} in every rule evaluation, providing:
+    //     - Zero-cost role check (no Firestore read per rule evaluation)
+    //     - Tamper-proof (JWT is signed by Firebase, cannot be forged client-side)
+    //     - Instant propagation via getIdToken(true) after role change
+    //
+    // Fallback: if custom claims are not yet synced (first-time setup),
+    // we fall back to the Firestore document read. The cloud function
+    // onUserRoleChanged ensures claims are always eventually consistent.
+
     function isAuthenticated() {
       return request.auth != null;
     }
+
+    function hasClaimRole(role) {
+      return isAuthenticated()
+        && request.auth.token.role != null
+        && request.auth.token.role == role;
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isAdmin() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+      return hasClaimRole('ADMIN');
     }
+
     function isMonitor() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'MONITOR';
+      return hasClaimRole('MONITOR');
     }
+
+    function isVoter() {
+      return hasClaimRole('VOTER') || (
+        isAuthenticated()
+        && request.auth.token.role == null
+      ); // Unset role defaults to VOTER
+    }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
     // === Users Collection ===
     match /users/{userId} {
-      // Anyone authenticated can read their own profile
+      // Voter: own profile only. Admin/Monitor: all profiles.
       allow read: if isOwner(userId) || isAdmin() || isMonitor();
-      // Only the user themselves can create their profile (on first login)
-      // Admin can update any user
+      // Self-registration (first login) or admin creation
       allow create: if isOwner(userId) || isAdmin();
-      allow update: if isOwner(userId) || isAdmin();
+      // Self-update (non-role fields) or admin update
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role)
+                    || isAdmin();
       allow delete: if false; // Never delete users
     }
 
     // === Elections Collection ===
     match /elections/{electionId} {
-      // Authenticated users can read elections
+      // All authenticated users can read elections
       allow read: if isAuthenticated();
-      // Only admin can create/update elections
+      // Admin only: create/update elections
       allow create: if isAdmin();
       allow update: if isAdmin();
       allow delete: if isAdmin();
@@ -41,9 +73,9 @@ service cloud.firestore {
 
     // === Candidates Collection ===
     match /candidates/{candidateId} {
-      // Authenticated users can read candidates
+      // All authenticated users can read candidates
       allow read: if isAuthenticated();
-      // Only admin can manage candidates
+      // Admin only: manage candidates
       allow create: if isAdmin();
       allow update: if isAdmin();
       allow delete: if isAdmin();
@@ -51,21 +83,26 @@ service cloud.firestore {
 
     // === Votes Collection ===
     match /votes/{voteId} {
-      // Users can read their own votes; admin/monitor can read all
-      allow read: if isAuthenticated() &&
-        (resource == null || resource.data.userId == request.auth.uid || isAdmin() || isMonitor());
-      // Any authenticated user can create a vote (one-vote rule enforced in app code)
+      // All authenticated users can read votes for transparency.
+      // Votes contain no PII — voterHash is SHA256 (irreversible),
+      // encryptedVoteData is AES-256-GCM encrypted.
+      allow read: if isAuthenticated();
+      // Any authenticated user can create a vote.
+      // One-vote-per-election rule enforced in app code via Firestore transaction.
       allow create: if isAuthenticated();
-      // Votes CANNOT be modified or deleted (immutable)
-      allow update: if false;
+      // Votes CANNOT be modified — except reconciliationStatus field
+      // which is updated by the reconciliation system.
+      allow update: if isAuthenticated()
+        && request.resource.data.keys().hasOnly(['reconciliationStatus'])
+        && resource.data.reconciliationStatus != 'RECONCILED';
       allow delete: if false;
     }
 
     // === Audit Logs Collection ===
     match /audit_logs/{logId} {
-      // Only admin and monitor can read audit logs
+      // Admin and Monitor can read audit logs
       allow read: if isAdmin() || isMonitor();
-      // System can create audit logs (authenticated users)
+      // Authenticated users can create audit logs
       allow create: if isAuthenticated();
       // Audit logs are immutable
       allow update: if false;

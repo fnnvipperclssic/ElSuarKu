@@ -12,15 +12,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -30,10 +31,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
+import com.example.elsuarku.BuildConfig
 import com.example.elsuarku.data.SeedUsers
 import com.example.elsuarku.presentation.components.ErrorDialog
 import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
+import com.example.elsuarku.security.BiometricPromptManager
+import com.example.elsuarku.security.BiometricResult
+import com.example.elsuarku.security.PinManager
 import com.example.elsuarku.ui.theme.*
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -46,7 +52,9 @@ import kotlinx.coroutines.withContext
 fun LoginScreen(
     authViewModel: AuthViewModel,
     onLoginSuccess: (String) -> Unit,
-    onNavigateToRegister: () -> Unit
+    onNavigateToRegister: () -> Unit,
+    pinManager: PinManager,
+    onNavigateToSetupPin: () -> Unit = {}
 ) {
     val loginState by authViewModel.loginState.collectAsState()
     var email by remember { mutableStateOf("") }
@@ -54,8 +62,15 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf<String?>(null) }
     var isGoogleSigningIn by remember { mutableStateOf(false) }
+    var showPinDialog by remember { mutableStateOf(false) }
+    var biometricStatus by remember { mutableStateOf<BiometricResult?>(null) }
     val context = LocalContext.current
+    val activity = context as FragmentActivity
     val coroutineScope = rememberCoroutineScope()
+
+    // Client-side validation
+    val isEmailValid = email.isBlank() || android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()
+    val isFormValid = email.isNotBlank() && isEmailValid && password.isNotBlank()
 
     // Entrance animation
     val entryAlpha by animateFloatAsState(targetValue = 1f, animationSpec = tween(400), label = "entry")
@@ -92,6 +107,12 @@ fun LoginScreen(
         } else {
             isGoogleSigningIn = false
         }
+    }
+
+    // Check biometric availability on first composition
+    LaunchedEffect(Unit) {
+        val bioManager = BiometricPromptManager()
+        biometricStatus = bioManager.canAuthenticate(activity)
     }
 
     LaunchedEffect(loginState) {
@@ -239,6 +260,10 @@ fun LoginScreen(
                         imeAction = ImeAction.Next
                     ),
                     singleLine = true,
+                    isError = !isEmailValid,
+                    supportingText = if (!isEmailValid) {
+                        { Text("Format email tidak valid", color = StatusError) }
+                    } else null,
                     colors = authTextFieldColors(),
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -280,8 +305,7 @@ fun LoginScreen(
                 Button(
                     onClick = { authViewModel.signInWithEmail(email, password) },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
-                    enabled = email.isNotBlank() && password.isNotBlank()
-                            && loginState !is AuthViewModel.LoginUiState.Loading,
+                    enabled = isFormValid && loginState !is AuthViewModel.LoginUiState.Loading,
                     colors = ButtonDefaults.buttonColors(containerColor = Gold),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -309,24 +333,132 @@ fun LoginScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
+
+                // ── Biometric / PIN Quick Login Section ──
+                val showBioButton = biometricStatus?.isAvailable == true && pinManager.hasCachedProfile()
+                val showPinSection = pinManager.hasCachedProfile()
+
+                if (showBioButton || showPinSection) {
+                    Spacer(Modifier.height(12.dp))
+
+                    // Divider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Canvas(Modifier.weight(1f).height(1.dp)) {
+                            drawLine(
+                                OnDeepBlue.copy(alpha = 0.15f),
+                                Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
+                            )
+                        }
+                        Text(
+                            "  masuk cepat  ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnDeepBlue.copy(alpha = 0.35f)
+                        )
+                        Canvas(Modifier.weight(1f).height(1.dp)) {
+                            drawLine(
+                                OnDeepBlue.copy(alpha = 0.15f),
+                                Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                // Biometric button — show if biometric is available AND user has cached profile
+                if (showBioButton) {
+                    OutlinedButton(
+                        onClick = {
+                            authViewModel.loginWithBiometric(
+                                activity = activity,
+                                onSuccess = { /* handled by LaunchedEffect(loginState) */ },
+                                onError = { showError = it }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = Brush.horizontalGradient(listOf(Gold, GoldLight))
+                        )
+                    ) {
+                        Icon(
+                            Icons.Filled.Fingerprint,
+                            contentDescription = null,
+                            tint = Gold
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Masuk dengan Biometrik",
+                            color = OnDeepBlue.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                // PIN button — show if PIN is set
+                if (pinManager.isPinSet()) {
+                    TextButton(
+                        onClick = { showPinDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Filled.Pin,
+                            contentDescription = null,
+                            tint = Gold.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Masuk dengan PIN",
+                            color = Gold.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                } else if (pinManager.hasCachedProfile()) {
+                    // User has logged in before but PIN not set
+                    TextButton(
+                        onClick = onNavigateToSetupPin,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = null,
+                            tint = Gold.copy(alpha = 0.5f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Setup PIN untuk Login Cepat",
+                            color = Gold.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(32.dp))
 
-            // Debug seed button
-            TextButton(onClick = {
-                coroutineScope.launch(Dispatchers.IO) {
-                    val results = SeedUsers.seed()
-                    withContext(Dispatchers.Main) {
-                        showError = results.joinToString("\n")
+            // Debug seed button — only visible in debug builds
+            if (BuildConfig.DEBUG) {
+                TextButton(onClick = {
+                    coroutineScope.launch(Dispatchers.IO) {
+                        val results = SeedUsers.seed()
+                        withContext(Dispatchers.Main) {
+                            showError = results.joinToString("\n")
+                        }
                     }
+                }) {
+                    Text(
+                        "[Dev] Seed Test Users",
+                        color = OnDeepBlue.copy(alpha = 0.25f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
                 }
-            }) {
-                Text(
-                    "[Dev] Seed Test Users",
-                    color = OnDeepBlue.copy(alpha = 0.25f),
-                    style = MaterialTheme.typography.labelSmall
-                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -335,6 +467,265 @@ fun LoginScreen(
 
     showError?.let { error ->
         ErrorDialog(message = error, onDismiss = { showError = null })
+    }
+
+    // ── PIN Login Dialog ──
+    if (showPinDialog) {
+        PinLoginDialog(
+            authViewModel = authViewModel,
+            onDismiss = {
+                showPinDialog = false
+                authViewModel.resetPinLockout()
+            }
+        )
+    }
+}
+
+/**
+ * Dialog for PIN-based quick login.
+ * Shows 4-dot PIN display + numeric keypad.
+ */
+@Composable
+private fun PinLoginDialog(
+    authViewModel: AuthViewModel,
+    onDismiss: () -> Unit
+) {
+    var pinInput by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val (failedAttempts, isLocked) = authViewModel.pinAttemptState
+
+    // Reset error when PIN changes
+    LaunchedEffect(pinInput) {
+        if (pinInput.isNotEmpty()) errorMsg = null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = Gold,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Masukkan PIN",
+                    fontWeight = FontWeight.Bold,
+                    color = OnDeepBlue
+                )
+            }
+        },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Masukkan PIN 4 digit Anda",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnDeepBlue.copy(alpha = 0.55f)
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                // PIN Display (4 dots)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    repeat(4) { index ->
+                        val isFilled = index < pinInput.length
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isFilled) Gold.copy(alpha = 0.2f)
+                                    else DeepBlueDark.copy(alpha = 0.3f),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = Brush.horizontalGradient(
+                                    listOf(
+                                        if (isFilled) Gold else OnDeepBlue.copy(alpha = 0.15f),
+                                        if (isFilled) GoldLight else OnDeepBlue.copy(alpha = 0.1f)
+                                    )
+                                )
+                            )
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isFilled) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .background(Gold, RoundedCornerShape(6.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Error message
+                if (errorMsg != null || failedAttempts > 0) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = errorMsg ?: if (isLocked)
+                            "Akun terkunci. Silakan login dengan email."
+                        else
+                            "",
+                        color = StatusError,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // Numeric Keypad
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("1", "2", "3").forEach { digit ->
+                            PinDialogKey(digit = digit, enabled = !isLocked && pinInput.length < 4) {
+                                pinInput += digit
+                                if (pinInput.length == 4) {
+                                    authViewModel.loginWithPin(
+                                        pin = pinInput,
+                                        onSuccess = { onDismiss() },
+                                        onError = { msg ->
+                                            errorMsg = msg
+                                            pinInput = ""
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("4", "5", "6").forEach { digit ->
+                            PinDialogKey(digit = digit, enabled = !isLocked && pinInput.length < 4) {
+                                pinInput += digit
+                                if (pinInput.length == 4) {
+                                    authViewModel.loginWithPin(
+                                        pin = pinInput,
+                                        onSuccess = { onDismiss() },
+                                        onError = { msg ->
+                                            errorMsg = msg
+                                            pinInput = ""
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("7", "8", "9").forEach { digit ->
+                            PinDialogKey(digit = digit, enabled = !isLocked && pinInput.length < 4) {
+                                pinInput += digit
+                                if (pinInput.length == 4) {
+                                    authViewModel.loginWithPin(
+                                        pin = pinInput,
+                                        onSuccess = { onDismiss() },
+                                        onError = { msg ->
+                                            errorMsg = msg
+                                            pinInput = ""
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Clear
+                        Button(
+                            onClick = { pinInput = ""; errorMsg = null },
+                            modifier = Modifier.size(52.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DeepBlueDark.copy(alpha = 0.4f)
+                            ),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("C", fontWeight = FontWeight.Bold, color = OnDeepBlue.copy(alpha = 0.6f))
+                        }
+
+                        // 0
+                        PinDialogKey(digit = "0", enabled = !isLocked && pinInput.length < 4) {
+                            pinInput += "0"
+                            if (pinInput.length == 4) {
+                                authViewModel.loginWithPin(
+                                    pin = pinInput,
+                                    onSuccess = { onDismiss() },
+                                    onError = { msg ->
+                                        errorMsg = msg
+                                        pinInput = ""
+                                    }
+                                )
+                            }
+                        }
+
+                        // Delete
+                        Button(
+                            onClick = {
+                                if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1)
+                                errorMsg = null
+                            },
+                            modifier = Modifier.size(52.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DeepBlueDark.copy(alpha = 0.4f)
+                            ),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Backspace,
+                                contentDescription = "Hapus",
+                                tint = OnDeepBlue.copy(alpha = 0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Batal", color = Gold.copy(alpha = 0.7f))
+            }
+        },
+        containerColor = DeepBlueDark,
+        titleContentColor = OnDeepBlue,
+        textContentColor = OnDeepBlue.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+/**
+ * Small key button for the PIN login dialog.
+ */
+@Composable
+private fun PinDialogKey(
+    digit: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.size(52.dp),
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = DeepBlueDark.copy(alpha = if (enabled) 0.5f else 0.25f),
+            disabledContainerColor = DeepBlueDark.copy(alpha = 0.2f)
+        ),
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        Text(
+            text = digit,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = if (enabled) OnDeepBlue else OnDeepBlue.copy(alpha = 0.25f)
+        )
     }
 }
 

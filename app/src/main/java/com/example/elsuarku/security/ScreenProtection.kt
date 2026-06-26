@@ -24,7 +24,13 @@ object ScreenProtection {
     /**
      * Disable screen protection — allows screenshots again.
      * Call when leaving sensitive screens.
+     *
+     * NOTE: Reserved for future use. Currently the app applies FLAG_SECURE
+     * globally in MainActivity and never removes it. This function exists
+     * for scenarios where selective screen protection is needed later
+     * (e.g., allowing screenshots on non-sensitive screens).
      */
+    @Suppress("unused")
     fun disable(activity: Activity) {
         activity.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
@@ -50,6 +56,10 @@ fun android.app.Activity.secureScreen() {
     ScreenProtection.enable(this)
 }
 
+/**
+ * Reserved for future use. See [ScreenProtection.disable] for details.
+ */
+@Suppress("unused")
 fun android.app.Activity.unsecureScreen() {
     ScreenProtection.disable(this)
 }

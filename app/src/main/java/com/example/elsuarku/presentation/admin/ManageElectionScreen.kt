@@ -37,8 +37,6 @@ fun ManageElectionScreen(
     var showDeleteDialog by remember { mutableStateOf<Election?>(null) }
     val context = LocalContext.current
 
-    LaunchedEffect(Unit) { viewModel.loadAllData() }
-
     LaunchedEffect(state.successMessage) {
         state.successMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()

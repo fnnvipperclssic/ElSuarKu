@@ -30,6 +30,8 @@ import com.example.elsuarku.security.AntiTampering
 import com.example.elsuarku.security.BiometricPromptManager
 import com.example.elsuarku.security.BiometricResult
 import com.example.elsuarku.ui.theme.*
+import androidx.fragment.app.FragmentActivity
+import com.example.elsuarku.utils.unwrapFragmentActivity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,16 +44,62 @@ fun VoteConfirmationScreen(
 ) {
     val state by viewModel.voteState.collectAsState()
     var showConfirmDialog by remember { mutableStateOf(false) }
-    var showIntegrityWarning by remember { mutableStateOf(false) }
-    var integrityMessage by remember { mutableStateOf("") }
+    var showBiometricDialog by remember { mutableStateOf(false) }
+    var biometricMessage by remember { mutableStateOf("") }
     var isBlockingError by remember { mutableStateOf(false) }
+    var biometricAttempts by remember { mutableStateOf(0) }
     val context = LocalContext.current
-    val activity = remember { context as? androidx.fragment.app.FragmentActivity }
 
     val biometricManager = remember { BiometricPromptManager() }
     val antiTampering = remember { AntiTampering(context) }
-    val biometricStatus = remember {
-        activity?.let { biometricManager.canAuthenticate(it) } ?: BiometricResult.Unknown
+    var biometricStatus by remember { mutableStateOf<BiometricResult?>(null) }
+
+    // Resolve FragmentActivity dynamically — NOT via remember {}
+    // because LocalContext.current is a ContextThemeWrapper, and the first
+    // composition pass may complete before the wrapper chain is fully stable.
+    var activity by remember { mutableStateOf<FragmentActivity?>(null) }
+    LaunchedEffect(Unit) {
+        activity = context.unwrapFragmentActivity()
+    }
+
+    // Dynamic biometric availability check — recomputes when activity is ready
+    LaunchedEffect(activity) {
+        biometricStatus = activity?.let { biometricManager.canAuthenticate(it) } ?: BiometricResult.Unknown
+    }
+
+    // Lambda for launching biometric prompt — defined early so it can be
+    // referenced from dialog callbacks below.
+    // Uses context.unwrapFragmentActivity() on each call to handle wrapped contexts.
+    val launchBiometricPrompt: () -> Unit = {
+        val act = context.unwrapFragmentActivity()
+        if (act == null) {
+            isBlockingError = true
+            biometricMessage = "Terjadi kesalahan sistem. Tidak dapat membuka verifikasi biometrik."
+            showBiometricDialog = true
+        } else {
+            biometricAttempts++
+            biometricManager.authenticate(
+                activity = act,
+                title = "Verifikasi Biometrik",
+                subtitle = "Konfirmasikan identitas Anda untuk memberikan suara",
+                allowDeviceCredential = true, // PIN/pola accepted as fallback
+                onSuccess = {
+                    biometricAttempts = 0
+                    viewModel.setBiometricVerified()
+                    viewModel.submitVote(electionId, candidateId)
+                },
+                onError = { error ->
+                    isBlockingError = false
+                    biometricMessage = "$error\n\nVerifikasi identitas WAJIB untuk memberikan suara. Silakan coba lagi."
+                    showBiometricDialog = true
+                },
+                onCancel = {
+                    isBlockingError = false
+                    biometricMessage = "Verifikasi dibatalkan. Anda WAJIB menyelesaikan verifikasi identitas untuk memberikan suara."
+                    showBiometricDialog = true
+                }
+            )
+        }
     }
 
     LaunchedEffect(electionId, candidateId) {
@@ -108,7 +156,7 @@ fun VoteConfirmationScreen(
                     val bitmap = remember(state.candidate?.photoBase64) {
                         state.candidate?.photoBase64?.let {
                             try {
-                                val bytes = Base64.decode(it, Base64.DEFAULT)
+                                val bytes = Base64.decode(it, Base64.NO_WRAP)
                                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             } catch (_: Exception) { null }
                         }
@@ -169,7 +217,7 @@ fun VoteConfirmationScreen(
             Spacer(Modifier.height(24.dp))
 
             // Biometric status
-            BiometricStatusIndicator(biometricStatus)
+            BiometricStatusIndicator(biometricStatus ?: BiometricResult.Unknown)
 
             Spacer(Modifier.height(16.dp))
 
@@ -215,84 +263,69 @@ fun VoteConfirmationScreen(
         }
     }
 
-    // ── Confirmation Dialog → Integrity Check → Biometric → Submit ──
+    // ── Confirmation Dialog → Integrity Check → Biometric (Mandatory) → Submit ──
     if (showConfirmDialog) {
         ConfirmationDialog(
             title = "Verifikasi Identitas",
             message = "Apakah Anda yakin ingin memberikan suara kepada ${state.candidate?.name}? " +
-                    "Tindakan ini memerlukan verifikasi keamanan dan tidak dapat dibatalkan.",
+                    "Verifikasi biometrik diperlukan untuk melanjutkan. Tindakan ini tidak dapat dibatalkan.",
             confirmText = "Ya, Pilih Sekarang",
             onConfirm = {
                 showConfirmDialog = false
+                // Step 1: Integrity check — blocking if threats detected
                 val integrity = antiTampering.performFullCheck()
                 if (!integrity.isSafe) {
                     isBlockingError = true
-                    integrityMessage = "⚠️ Masalah keamanan terdeteksi: ${integrity.threats.joinToString(", ")}.\n\nVoting tidak dapat dilanjutkan demi keamanan suara Anda."
-                    showIntegrityWarning = true
+                    biometricMessage = "⚠️ Masalah keamanan terdeteksi: ${integrity.threats.joinToString(", ")}.\n\nVoting tidak dapat dilanjutkan demi keamanan suara Anda."
+                    showBiometricDialog = true
                     return@ConfirmationDialog
                 }
+                // Step 2: Check biometric availability
                 if (activity == null) {
-                    viewModel.submitVote(electionId, candidateId)
+                    isBlockingError = true
+                    biometricMessage = "Terjadi kesalahan sistem. Tidak dapat membuka verifikasi biometrik.\nSilakan coba lagi."
+                    showBiometricDialog = true
                     return@ConfirmationDialog
                 }
-                if (biometricStatus.isAvailable || biometricStatus.isNotEnrolled) {
-                    biometricManager.authenticate(
-                        activity = activity,
-                        title = "Verifikasi Biometrik",
-                        subtitle = "Konfirmasikan identitas Anda untuk memberikan suara",
-                        allowDeviceCredential = true,
-                        onSuccess = { viewModel.submitVote(electionId, candidateId) },
-                        onError = { error ->
-                            isBlockingError = false
-                            integrityMessage = "$error\n\nAnda dapat mencoba lagi atau melanjutkan tanpa verifikasi biometrik."
-                            showIntegrityWarning = true
-                        },
-                        onCancel = { /* stay on screen */ }
-                    )
-                } else {
-                    isBlockingError = false
-                    integrityMessage = "Biometrik tidak tersedia: ${biometricStatus.userFriendlyMessage}\n\nAnda tetap dapat melanjutkan voting tanpa verifikasi biometrik."
-                    showIntegrityWarning = true
+                val bioStatus = biometricStatus
+                if (bioStatus == null || (bioStatus !is BiometricResult.Available && bioStatus !is BiometricResult.NotEnrolled)) {
+                    isBlockingError = true
+                    biometricMessage = if (bioStatus == null) "Sedang memeriksa biometrik. Silakan coba lagi dalam beberapa saat."
+                    else "Biometrik tidak tersedia: ${bioStatus.userFriendlyMessage}\n\n" +
+                            "Verifikasi identitas WAJIB untuk memberikan suara. " +
+                            "Pastikan perangkat Anda memiliki sensor biometrik yang berfungsi."
+                    showBiometricDialog = true
+                    return@ConfirmationDialog
                 }
+                // Step 3: Launch biometric prompt (mandatory — no skip)
+                biometricAttempts = 0
+                launchBiometricPrompt()
             },
             onDismiss = { showConfirmDialog = false }
         )
     }
 
-    if (showIntegrityWarning) {
-        ErrorDialog(
-            title = if (isBlockingError) "⚠️ Peringatan Keamanan" else "Verifikasi Biometrik",
-            message = integrityMessage,
-            onDismiss = { showIntegrityWarning = false },
-            onRetry = if (!isBlockingError) {
-                {
-                    showIntegrityWarning = false
-                    if (activity != null) {
-                        biometricManager.authenticate(
-                            activity = activity,
-                            title = "Verifikasi Biometrik",
-                            subtitle = "Konfirmasikan identitas Anda untuk memberikan suara",
-                            allowDeviceCredential = true,
-                            onSuccess = { viewModel.submitVote(electionId, candidateId) },
-                            onError = { error ->
-                                isBlockingError = false
-                                integrityMessage = "$error\n\nAnda dapat mencoba lagi atau melanjutkan tanpa verifikasi biometrik."
-                                showIntegrityWarning = true
-                            },
-                            onCancel = { }
-                        )
-                    } else {
-                        viewModel.submitVote(electionId, candidateId)
-                    }
-                }
-            } else null,
-            secondaryButton = if (!isBlockingError) {
-                Pair({
-                    showIntegrityWarning = false
-                    viewModel.submitVote(electionId, candidateId)
-                }, "Lanjutkan Tanpa Biometrik")
-            } else null
-        )
+    // ── Biometric Result Dialog ──
+    if (showBiometricDialog) {
+        if (isBlockingError) {
+            // Integrity failure or biometric hardware unavailable — BLOCK voting
+            ErrorDialog(
+                title = "⚠️ Verifikasi Gagal",
+                message = biometricMessage,
+                onDismiss = { showBiometricDialog = false },
+                onRetry = null,
+                secondaryButton = null
+            )
+        } else {
+            // Biometric failed but can retry
+            ErrorDialog(
+                title = "Verifikasi Biometrik",
+                message = biometricMessage,
+                onDismiss = { showBiometricDialog = false },
+                onRetry = { showBiometricDialog = false; launchBiometricPrompt() },
+                secondaryButton = null // No skip — biometric is mandatory
+            )
+        }
     }
 
     state.error?.let { error ->
@@ -305,6 +338,7 @@ private fun BiometricStatusIndicator(status: BiometricResult) {
     val (icon, label, color) = when (status) {
         is BiometricResult.Available -> Triple(Icons.Filled.Fingerprint, "Biometrik Tersedia", EmeraldGreen)
         is BiometricResult.NotEnrolled -> Triple(Icons.Filled.Fingerprint, "Biometrik Tidak Terdaftar", StatusWarning)
+        is BiometricResult.Unknown -> Triple(Icons.Filled.Security, "Memeriksa Biometrik...", StatusWarning)
         else -> Triple(Icons.Filled.Security, "Verifikasi Alternatif", StatusWarning)
     }
 

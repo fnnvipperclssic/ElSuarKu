@@ -73,3 +73,8 @@ app/release/
 .metals/
 .bloop/
 .bsp/
+
+# --- Firebase Cloud Functions ---
+functions/node_modules/
+functions/lib/
+functions/.env

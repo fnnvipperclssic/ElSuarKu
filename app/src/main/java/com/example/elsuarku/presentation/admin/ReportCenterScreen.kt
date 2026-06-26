@@ -1,5 +1,6 @@
 package com.example.elsuarku.presentation.admin
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +23,9 @@ import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
 import com.example.elsuarku.ui.theme.*
 import com.example.elsuarku.utils.showToast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,13 +34,14 @@ fun ReportCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
     var selectedElection by remember { mutableStateOf<Election?>(null) }
     var reportText by remember { mutableStateOf("") }
     var showReport by remember { mutableStateOf(false) }
+    var isPdfGenerating by remember { mutableStateOf(false) }
+    var isGeneratingReport by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    // TODO: Update Compose BOM when stable. LocalClipboardManager might need migration to new API.
     @Suppress("DEPRECATION")
-    val clipboard = LocalClipboardManager.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = LocalContext.current
 
-    LaunchedEffect(Unit) { viewModel.loadAllData() }
-
-    // Load candidates when election selected for report generation
     LaunchedEffect(selectedElection) {
         selectedElection?.let { viewModel.loadCandidates(it.id) }
     }
@@ -159,34 +163,56 @@ fun ReportCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = {
-                                        reportText = viewModel.exportReport(selectedElection!!.id)
-                                        showReport = true
+                                        if (!isGeneratingReport) {
+                                            isGeneratingReport = true
+                                            coroutineScope.launch {
+                                                reportText = viewModel.exportReport(selectedElection!!.id)
+                                                isGeneratingReport = false
+                                                showReport = true
+                                            }
+                                        }
                                     },
                                     modifier = Modifier.weight(1f),
+                                    enabled = !isGeneratingReport,
                                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
                                     shape = RoundedCornerShape(14.dp)
                                 ) {
-                                    Icon(Icons.Filled.Description, null, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Generate Report", style = MaterialTheme.typography.labelLarge)
+                                    if (isGeneratingReport) {
+                                        LoadingIndicator(modifier = Modifier.size(20.dp))
+                                    } else {
+                                        Icon(Icons.Filled.Description, null, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Generate Report", style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                                 Button(
                                     onClick = {
-                                        reportText = viewModel.exportReport(selectedElection!!.id)
-                                        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "Laporan: ${selectedElection!!.title}")
-                                            putExtra(android.content.Intent.EXTRA_TEXT, reportText)
+                                        if (!isGeneratingReport) {
+                                            isGeneratingReport = true
+                                            coroutineScope.launch {
+                                                reportText = viewModel.exportReport(selectedElection!!.id)
+                                                isGeneratingReport = false
+                                                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Laporan: ${selectedElection!!.title}")
+                                                    putExtra(android.content.Intent.EXTRA_TEXT, reportText)
+                                                }
+                                                context.startActivity(android.content.Intent.createChooser(shareIntent, "Bagikan Laporan"))
+                                            }
                                         }
-                                        context.startActivity(android.content.Intent.createChooser(shareIntent, "Bagikan Laporan"))
                                     },
                                     modifier = Modifier.weight(1f),
+                                    enabled = !isGeneratingReport,
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepBlue),
                                     shape = RoundedCornerShape(14.dp)
                                 ) {
-                                    Icon(Icons.Filled.Share, null, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Bagikan", style = MaterialTheme.typography.labelLarge)
+                                    if (isGeneratingReport) {
+                                        LoadingIndicator(modifier = Modifier.size(20.dp))
+                                    } else {
+                                        Icon(Icons.Filled.Share, null, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Bagikan", style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                             }
                         }
@@ -198,23 +224,59 @@ fun ReportCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                     Text("Format Export", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = DeepBlueDark)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ExportFormatCard("TXT", "Plain Text", Icons.AutoMirrored.Filled.TextSnippet, DeepBlueLight, Modifier.weight(1f), onClick = {
-                            if (selectedElection != null) {
-                                reportText = viewModel.exportReport(selectedElection!!.id)
-                                showReport = true
+                            if (selectedElection != null && !isGeneratingReport) {
+                                isGeneratingReport = true
+                                coroutineScope.launch {
+                                    reportText = viewModel.exportReport(selectedElection!!.id)
+                                    isGeneratingReport = false
+                                    showReport = true
+                                }
                             }
                         })
                         ExportFormatCard("CSV", "Spreadsheet", Icons.Filled.TableChart, EmeraldGreen, Modifier.weight(1f), onClick = {
-                            if (selectedElection != null) {
-                                reportText = viewModel.exportReport(selectedElection!!.id)
-                                    .replace("=", ",").replace(": ", ",")
-                                showReport = true
+                            if (selectedElection != null && !isGeneratingReport) {
+                                isGeneratingReport = true
+                                coroutineScope.launch {
+                                    reportText = viewModel.exportReport(selectedElection!!.id)
+                                        .replace("=", ",").replace(": ", ",")
+                                    isGeneratingReport = false
+                                    showReport = true
+                                }
                             }
                         })
-                        ExportFormatCard("PDF*", "Document", Icons.Filled.PictureAsPdf, StatusError, Modifier.weight(1f), onClick = {
-                            context.showToast("Export PDF belum tersedia — gunakan TXT atau CSV")
+                        ExportFormatCard("PDF", "Document", Icons.Filled.PictureAsPdf, StatusError, Modifier.weight(1f), onClick = {
+                            if (selectedElection != null && !isPdfGenerating) {
+                                isPdfGenerating = true
+                                coroutineScope.launch {
+                                    val pdfPath = withContext(Dispatchers.IO) {
+                                        viewModel.generatePdfReport(context, selectedElection!!.id)
+                                    }
+                                    isPdfGenerating = false
+                                    if (pdfPath != null) {
+                                        val pdfFile = java.io.File(pdfPath)
+                                        if (pdfFile.exists()) {
+                                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                pdfFile
+                                            )
+                                            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(android.content.Intent.createChooser(shareIntent, "Bagikan PDF"))
+                                        } else {
+                                            context.showToast("Gagal membuat file PDF")
+                                        }
+                                    } else {
+                                        context.showToast("Gagal membuat PDF")
+                                    }
+                                }
+                            }
                         })
                     }
-                    Text("* PDF belum tersedia. TXT & CSV dapat langsung digunakan.", style = MaterialTheme.typography.labelSmall, color = DeepBlueLight)
+                    Text("* Hasilkan PDF laporan pemilihan.", style = MaterialTheme.typography.labelSmall, color = DeepBlueLight)
                     Spacer(Modifier.height(8.dp))
                 }
             }

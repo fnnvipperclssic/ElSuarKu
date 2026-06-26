@@ -7,13 +7,47 @@
         </trust-anchors>
     </base-config>
 
-    <!-- Firebase domains -->
+    <!-- Firebase domains with certificate pinning -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">firebaseio.com</domain>
         <domain includeSubdomains="true">googleapis.com</domain>
         <domain includeSubdomains="true">firebase.google.com</domain>
+        <domain includeSubdomains="true">google.com</domain>
+
+        <!--
+            Certificate Pinning for Firebase/Google domains.
+
+            Pins are SPKI (Subject Public Key Info) SHA-256 hashes of the
+            intermediate/leaf certificates. If the server certificate doesn't
+            match any pin, the connection is rejected.
+
+            IMPORTANT: Update pins every 90 days during CI/CD. If a pin expires
+            before an app update, ALL Firebase traffic will fail silently.
+
+            Current pins (valid through ~2027):
+            - GTS CA 1C3  (Google Trust Services intermediate)
+            - GTS CA 1D4  (Google Trust Services intermediate, backup)
+            - GlobalSign Root CA R4 (backup root)
+        -->
+        <pin-set expiration="2027-12-31">
+            <!-- GTS CA 1C3 -->
+            <pin digest="SHA-256">h6801m+z8v3zbgkRHpq6L29Esgfzhj89C1SyUCOQmqU=</pin>
+            <!-- GTS CA 1D4 -->
+            <pin digest="SHA-256">r/mIkG3eEpVdm+u/ko/cwxzOMo1bk4TyHIlByibiA5E=</pin>
+            <!-- GlobalSign Root CA R4 — backup -->
+            <pin digest="SHA-256">K87oWBWM9UZ92t9oDiDRCNZQDj4jF9L+9SduWmMzxFU=</pin>
+        </pin-set>
+
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </domain-config>
+
+    <!-- Debug overrides — allow user CA for local debugging -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config>
