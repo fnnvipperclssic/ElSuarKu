@@ -2,7 +2,9 @@ package com.example.elsuarku.presentation.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.elsuarku.data.model.Announcement
 import com.example.elsuarku.data.model.Election
+import com.example.elsuarku.domain.repository.IAnnouncementRepository
 import com.example.elsuarku.domain.repository.IAuthRepository
 import com.example.elsuarku.domain.repository.IElectionRepository
 import com.example.elsuarku.domain.repository.IVoteRepository
@@ -22,7 +24,8 @@ class DashboardViewModel(
     private val electionRepository: IElectionRepository,
     private val voteRepository: IVoteRepository,
     private val authRepository: IAuthRepository,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val announcementRepository: IAnnouncementRepository
 ) : ViewModel() {
 
     data class UserDashboardState(
@@ -31,6 +34,8 @@ class DashboardViewModel(
         val votedElectionIds: Set<String> = emptySet(),
         val userName: String = "",
         val userEmail: String = "",
+        val announcements: List<Announcement> = emptyList(),
+        val dismissedAnnouncementIds: Set<String> = emptySet(),
         val isLoading: Boolean = true,
         val error: String? = null
     )
@@ -187,6 +192,23 @@ class DashboardViewModel(
             }
             else -> { /* keep whatever we have */ }
         }
+    }
+
+    fun loadAnnouncements() {
+        viewModelScope.launch {
+            when (val r = announcementRepository.getActiveAnnouncements()) {
+                is Resource.Success -> {
+                    _state.value = _state.value.copy(announcements = r.data)
+                }
+                else -> { /* keep whatever we have */ }
+            }
+        }
+    }
+
+    fun dismissAnnouncement(announcementId: String) {
+        _state.value = _state.value.copy(
+            dismissedAnnouncementIds = _state.value.dismissedAnnouncementIds + announcementId
+        )
     }
 
     fun refreshSession() {

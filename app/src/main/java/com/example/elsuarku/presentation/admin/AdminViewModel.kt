@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.elsuarku.data.model.*
 import com.example.elsuarku.data.repository.AuthRepository
 import com.example.elsuarku.data.repository.ImageStorage
+import com.example.elsuarku.domain.repository.IAnnouncementRepository
 import com.example.elsuarku.domain.repository.IAuditRepository
 import com.example.elsuarku.domain.repository.IAuthRepository
 import com.example.elsuarku.domain.repository.ICandidateRepository
@@ -34,7 +35,8 @@ class AdminViewModel(
     private val auditRepository: IAuditRepository,
     private val authRepository: IAuthRepository,
     private val imageStorage: ImageStorage,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val announcementRepository: IAnnouncementRepository
 ) : ViewModel() {
     companion object {
         private const val TAG = "AdminViewModel"
@@ -61,6 +63,9 @@ class AdminViewModel(
         // Security
         val securityAlerts: List<AuditLog> = emptyList(),
         val failedLogins: Int = 0,
+        // Announcements
+        val announcements: List<Announcement> = emptyList(),
+        val isAnnouncementLoading: Boolean = false,
         // UI
         val isLoading: Boolean = false,
         val error: String? = null,
@@ -526,6 +531,102 @@ class AdminViewModel(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to generate PDF report", e)
             null
+        }
+    }
+
+    // ==================== ANNOUNCEMENT MANAGEMENT ====================
+
+    fun loadAnnouncements() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isAnnouncementLoading = true)
+            when (val r = announcementRepository.getAllAnnouncements()) {
+                is Resource.Success -> _state.value = _state.value.copy(
+                    announcements = r.data,
+                    isAnnouncementLoading = false
+                )
+                is Resource.Error -> _state.value = _state.value.copy(
+                    isAnnouncementLoading = false,
+                    error = r.message
+                )
+                else -> _state.value = _state.value.copy(isAnnouncementLoading = false)
+            }
+        }
+    }
+
+    fun createAnnouncement(title: String, message: String, priority: String) {
+        viewModelScope.launch {
+            val safeTitle = InputSanitizer.sanitizeText(title, 300)
+            val safeMessage = InputSanitizer.sanitizeText(message, 2000)
+            if (safeTitle.isBlank()) {
+                _state.value = _state.value.copy(error = "Judul pengumuman tidak valid")
+                return@launch
+            }
+            _state.value = _state.value.copy(isLoading = true)
+            val announcement = Announcement(
+                title = safeTitle,
+                message = safeMessage,
+                priority = priority,
+                createdBy = userId,
+                createdAt = System.currentTimeMillis()
+            )
+            when (val r = announcementRepository.createAnnouncement(announcement)) {
+                is Resource.Success -> {
+                    auditRepository.log(userId, userName, userRole, AuditAction.ANNOUNCEMENT_CREATED, r.data.id, title)
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        successMessage = "Pengumuman berhasil dibuat"
+                    )
+                    loadAnnouncements()
+                }
+                is Resource.Error -> _state.value = _state.value.copy(isLoading = false, error = r.message)
+                else -> {}
+            }
+        }
+    }
+
+    fun updateAnnouncement(announcement: Announcement) {
+        viewModelScope.launch {
+            val safeTitle = InputSanitizer.sanitizeText(announcement.title, 300)
+            val safeMessage = InputSanitizer.sanitizeText(announcement.message, 2000)
+            _state.value = _state.value.copy(isLoading = true)
+            val updated = announcement.copy(title = safeTitle, message = safeMessage)
+            when (val r = announcementRepository.updateAnnouncement(updated)) {
+                is Resource.Success -> {
+                    auditRepository.log(userId, userName, userRole, AuditAction.ANNOUNCEMENT_UPDATED, r.data.id, safeTitle)
+                    _state.value = _state.value.copy(isLoading = false, successMessage = "Pengumuman diperbarui")
+                    loadAnnouncements()
+                }
+                is Resource.Error -> _state.value = _state.value.copy(isLoading = false, error = r.message)
+                else -> {}
+            }
+        }
+    }
+
+    fun deleteAnnouncement(announcementId: String) {
+        viewModelScope.launch {
+            when (val r = announcementRepository.deleteAnnouncement(announcementId)) {
+                is Resource.Success -> {
+                    auditRepository.log(userId, userName, userRole, AuditAction.ANNOUNCEMENT_DELETED, announcementId)
+                    _state.value = _state.value.copy(successMessage = "Pengumuman dihapus")
+                    loadAnnouncements()
+                }
+                is Resource.Error -> _state.value = _state.value.copy(error = r.message)
+                else -> {}
+            }
+        }
+    }
+
+    fun toggleAnnouncementActive(announcement: Announcement) {
+        viewModelScope.launch {
+            val updated = announcement.copy(isActive = !announcement.isActive)
+            when (val r = announcementRepository.updateAnnouncement(updated)) {
+                is Resource.Success -> {
+                    _state.value = _state.value.copy(successMessage = "Status pengumuman diperbarui")
+                    loadAnnouncements()
+                }
+                is Resource.Error -> _state.value = _state.value.copy(error = r.message)
+                else -> {}
+            }
         }
     }
 

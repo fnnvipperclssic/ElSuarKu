@@ -335,48 +335,48 @@ fun LoginScreen(
                 }
 
                 // ── Biometric / PIN Quick Login Section ──
-                val showBioButton = biometricStatus?.isAvailable == true && pinManager.hasCachedProfile()
-                val showPinSection = pinManager.hasCachedProfile()
+                // Always visible — biometric when hardware available, PIN/Setup always shown
+                val showBioButton = biometricStatus?.isAvailable == true
 
-                if (showBioButton || showPinSection) {
-                    Spacer(Modifier.height(12.dp))
-
-                    // Divider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Canvas(Modifier.weight(1f).height(1.dp)) {
-                            drawLine(
-                                OnDeepBlue.copy(alpha = 0.15f),
-                                Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
-                            )
-                        }
-                        Text(
-                            "  masuk cepat  ",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OnDeepBlue.copy(alpha = 0.35f)
+                // Divider
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Canvas(Modifier.weight(1f).height(1.dp)) {
+                        drawLine(
+                            OnDeepBlue.copy(alpha = 0.15f),
+                            Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
                         )
-                        Canvas(Modifier.weight(1f).height(1.dp)) {
-                            drawLine(
-                                OnDeepBlue.copy(alpha = 0.15f),
-                                Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
-                            )
-                        }
                     }
-
-                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "  masuk cepat  ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnDeepBlue.copy(alpha = 0.35f)
+                    )
+                    Canvas(Modifier.weight(1f).height(1.dp)) {
+                        drawLine(
+                            OnDeepBlue.copy(alpha = 0.15f),
+                            Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f
+                        )
+                    }
                 }
+                Spacer(Modifier.height(12.dp))
 
-                // Biometric button — show if biometric is available AND user has cached profile
+                // Biometric button — show whenever biometric hardware is available
                 if (showBioButton) {
                     OutlinedButton(
                         onClick = {
-                            authViewModel.loginWithBiometric(
-                                activity = activity,
-                                onSuccess = { /* handled by LaunchedEffect(loginState) */ },
-                                onError = { showError = it }
-                            )
+                            if (pinManager.hasCachedProfile()) {
+                                authViewModel.loginWithBiometric(
+                                    activity = activity,
+                                    onSuccess = { /* handled by LaunchedEffect(loginState) */ },
+                                    onError = { showError = it }
+                                )
+                            } else {
+                                showError = "Belum ada sesi tersimpan. Silakan login dengan email terlebih dahulu, lalu Anda dapat menggunakan biometrik untuk login cepat selanjutnya."
+                            }
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(12.dp),
@@ -403,7 +403,13 @@ fun LoginScreen(
                 // PIN button — show if PIN is set
                 if (pinManager.isPinSet()) {
                     TextButton(
-                        onClick = { showPinDialog = true },
+                        onClick = {
+                            if (pinManager.hasCachedProfile()) {
+                                showPinDialog = true
+                            } else {
+                                showError = "Belum ada sesi tersimpan. Silakan login dengan email terlebih dahulu."
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(
@@ -419,8 +425,8 @@ fun LoginScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
-                } else if (pinManager.hasCachedProfile()) {
-                    // User has logged in before but PIN not set
+                } else {
+                    // Setup PIN — always available
                     TextButton(
                         onClick = onNavigateToSetupPin,
                         modifier = Modifier.fillMaxWidth()
@@ -437,6 +443,60 @@ fun LoginScreen(
                             color = Gold.copy(alpha = 0.5f),
                             style = MaterialTheme.typography.bodyMedium
                         )
+                    }
+                }
+
+                // ── Biometric Status Card ──
+                // Shows device biometric capability with color-coded status
+                if (biometricStatus != null) {
+                    Spacer(Modifier.height(8.dp))
+
+                    val statusColor = if (biometricStatus?.isAvailable == true)
+                        StatusSuccess.copy(alpha = 0.15f)
+                    else
+                        Gold.copy(alpha = 0.1f)
+
+                    val statusIcon = if (biometricStatus?.isAvailable == true)
+                        Icons.Filled.CheckCircle
+                    else
+                        Icons.Filled.Info
+
+                    val statusIconTint = if (biometricStatus?.isAvailable == true)
+                        StatusSuccess
+                    else
+                        Gold
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = statusColor
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                statusIcon,
+                                contentDescription = null,
+                                tint = statusIconTint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    biometricStatus?.userFriendlyMessage ?: "Memeriksa biometrik...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OnDeepBlue.copy(alpha = 0.8f)
+                                )
+                                if (biometricStatus?.isNotEnrolled == true) {
+                                    Text(
+                                        "Buka Pengaturan → Keamanan → Daftarkan sidik jari",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = OnDeepBlue.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

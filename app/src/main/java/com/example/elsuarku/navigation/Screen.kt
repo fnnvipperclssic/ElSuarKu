@@ -1,6 +1,9 @@
 package com.example.elsuarku.navigation
 
 sealed class Screen(val route: String) {
+    // Onboarding (first-launch only)
+    data object Onboarding : Screen("onboarding")
+
     // Auth
     data object Login : Screen("login")
     data object Register : Screen("register")
@@ -26,6 +29,7 @@ sealed class Screen(val route: String) {
         fun createRoute(electionId: String) = "manage_candidate/$electionId"
     }
     data object UserManagement : Screen("user_management")
+    data object ManageAnnouncement : Screen("manage_announcement")
     data object ReportCenter : Screen("report_center")
     data object AdminSecurity : Screen("admin_security")
 

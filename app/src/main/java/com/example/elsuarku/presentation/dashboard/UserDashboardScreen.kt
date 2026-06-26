@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import com.example.elsuarku.data.model.Election
+import com.example.elsuarku.presentation.components.AnnouncementBanner
 import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
 import com.example.elsuarku.ui.theme.*
@@ -44,7 +45,7 @@ fun UserDashboardScreen(
         }
     }
 
-    LaunchedEffect(Unit) { viewModel.loadDashboard(); viewModel.refreshSession() }
+    LaunchedEffect(Unit) { viewModel.loadDashboard(); viewModel.refreshSession(); viewModel.loadAnnouncements() }
 
     Scaffold(
         topBar = {
@@ -100,6 +101,18 @@ fun UserDashboardScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // ── ANNOUNCEMENT BANNER ──
+                val visibleAnnouncements = state.announcements
+                    .filter { it.id !in state.dismissedAnnouncementIds }
+                if (visibleAnnouncements.isNotEmpty()) {
+                    item {
+                        AnnouncementBanner(
+                            announcements = visibleAnnouncements,
+                            onDismiss = { viewModel.dismissAnnouncement(it.id) }
+                        )
+                    }
+                }
+
                 // ── WELCOME BANNER ──
                 item {
                     Box(

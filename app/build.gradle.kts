@@ -143,4 +143,7 @@ dependencies {
     // Vico Charts — vote result visualization
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
+
+    // WorkManager — background reconciliation
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

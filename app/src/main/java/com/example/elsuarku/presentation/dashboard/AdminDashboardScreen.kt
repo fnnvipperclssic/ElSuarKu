@@ -35,6 +35,7 @@ fun AdminDashboardScreen(
     onNavigateToUserManagement: () -> Unit,
     onNavigateToReport: () -> Unit,
     onNavigateToSecurity: () -> Unit,
+    onNavigateToAnnouncements: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onLogout: () -> Unit
 ) {
@@ -226,7 +227,10 @@ fun AdminDashboardScreen(
                 }
             }
             item {
-                AdminMenuCard("Keamanan", "Log aktivitas, alert,\nblacklist device", Icons.Filled.Security, StatusError, Modifier.fillMaxWidth(), onNavigateToSecurity)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AdminMenuCard("Pengumuman", "Buat & kelola\npengumuman", Icons.Filled.Campaign, StatusWarning, Modifier.weight(1f), onNavigateToAnnouncements)
+                    AdminMenuCard("Keamanan", "Log aktivitas, alert,\nblacklist device", Icons.Filled.Security, StatusError, Modifier.weight(1f), onNavigateToSecurity)
+                }
             }
 
             // ── SEMUA PEMILIHAN ──

@@ -185,6 +185,23 @@ class SessionManager(private val context: Context) {
         prefs.edit().putBoolean(Constants.PREF_BIOMETRIC_ENABLED, enabled).apply()
     }
 
+    // ---- Onboarding ----
+
+    /**
+     * Check if onboarding has been completed by the user.
+     * Returns false for first-time users.
+     */
+    fun isOnboardingComplete(): Boolean {
+        return prefs.getBoolean("onboarding_complete", false)
+    }
+
+    /**
+     * Mark onboarding as complete so it won't show again.
+     */
+    fun setOnboardingComplete() {
+        prefs.edit().putBoolean("onboarding_complete", true).apply()
+    }
+
     // ---- Clear ----
 
     /**

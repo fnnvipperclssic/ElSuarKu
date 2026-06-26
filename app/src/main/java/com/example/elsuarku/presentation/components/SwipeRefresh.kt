@@ -2,8 +2,10 @@ package com.example.elsuarku.presentation.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -11,13 +13,14 @@ import androidx.compose.ui.Modifier
 /**
  * Pull-to-refresh wrapper for list screens.
  *
- * Currently uses a simple loading indicator pattern. Material3 PullToRefresh
- * will be adopted once the experimental API stabilizes in the Compose BOM.
+ * Uses Material3 PullToRefreshBox with the standard indicator.
+ * Provides a consistent pull-to-refresh experience across all list screens.
  *
  * @param isRefreshing Whether a refresh is in progress
- * @param onRefresh Callback when user requests refresh (not auto-triggered)
+ * @param onRefresh Callback when user triggers a pull-to-refresh
  * @param content The scrollable content
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeRefreshContainer(
     isRefreshing: Boolean,
@@ -25,21 +28,21 @@ fun SwipeRefreshContainer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    Box(modifier = modifier) {
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier
+    ) {
         content()
-        if (isRefreshing) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
     }
 }
 
 /**
- * Simple swipe-to-refresh without Material3 experimental API dependency.
- * Uses a manual trigger-based approach for compatibility with older Compose versions.
+ * Pull-to-refresh with optional empty state message.
+ * Alias for SwipeRefreshContainer with the same behavior — kept for
+ * backward compatibility with existing call sites.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeRefreshCompat(
     isRefreshing: Boolean,
@@ -48,13 +51,11 @@ fun SwipeRefreshCompat(
     emptyMessage: String? = null,
     content: @Composable () -> Unit
 ) {
-    Box(modifier = modifier) {
-        if (isRefreshing) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier
+    ) {
         content()
     }
 }

@@ -20,6 +20,7 @@ import com.example.elsuarku.data.model.UserRole
 import com.example.elsuarku.data.model.UserStatus
 import com.example.elsuarku.presentation.components.GlassCard
 import com.example.elsuarku.presentation.components.LoadingIndicator
+import com.example.elsuarku.presentation.components.SearchBar
 import com.example.elsuarku.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -28,7 +29,17 @@ fun UserManagementScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsState()
     var showRoleDialog by remember { mutableStateOf<User?>(null) }
     var showStatusDialog by remember { mutableStateOf<User?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Filter users by search query (case-insensitive match on name or email)
+    val filteredUsers = remember(state.users, searchQuery) {
+        if (searchQuery.isBlank()) state.users
+        else state.users.filter {
+            it.name.contains(searchQuery, ignoreCase = true) ||
+            it.email.contains(searchQuery, ignoreCase = true)
+        }
+    }
 
     LaunchedEffect(state.successMessage) {
         state.successMessage?.let {
@@ -72,6 +83,15 @@ fun UserManagementScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
             }
 
             item {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    placeholder = "Cari pengguna...",
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            item {
                 Text(
                     "Daftar Pengguna",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -90,7 +110,7 @@ fun UserManagementScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                     }
                 }
             } else {
-                items(state.users) { user ->
+                items(filteredUsers) { user ->
                     GlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 14.dp) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Icon(

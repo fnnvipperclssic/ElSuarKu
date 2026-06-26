@@ -1,20 +1,26 @@
 package com.example.elsuarku.di
 
 import android.content.Context
+import com.example.elsuarku.data.repository.AnnouncementRepository
 import com.example.elsuarku.data.repository.AuditRepository
 import com.example.elsuarku.data.repository.AuthRepository
 import com.example.elsuarku.data.repository.CandidateRepository
 import com.example.elsuarku.data.repository.ElectionRepository
 import com.example.elsuarku.data.repository.ImageStorage
 import com.example.elsuarku.data.repository.VoteRepository
+import com.example.elsuarku.data.repository.ElectionTemplateRepository
+import com.example.elsuarku.domain.repository.IAnnouncementRepository
 import com.example.elsuarku.domain.repository.IAuditRepository
 import com.example.elsuarku.domain.repository.IAuthRepository
 import com.example.elsuarku.domain.repository.ICandidateRepository
 import com.example.elsuarku.domain.repository.IElectionRepository
+import com.example.elsuarku.domain.repository.IElectionTemplateRepository
 import com.example.elsuarku.domain.repository.IVoteRepository
+import com.google.firebase.firestore.FirebaseFirestore
 import com.example.elsuarku.presentation.admin.AdminViewModel
 import com.example.elsuarku.presentation.auth.AuthViewModel
 import com.example.elsuarku.presentation.dashboard.DashboardViewModel
+import com.example.elsuarku.domain.usecase.SubmitVoteUseCase
 import com.example.elsuarku.presentation.monitor.MonitorViewModel
 import com.example.elsuarku.presentation.voting.VotingViewModel
 import com.example.elsuarku.security.AntiTampering
@@ -46,13 +52,22 @@ class AppModule(context: Context) {
     val candidateRepository: ICandidateRepository by lazy { CandidateRepository() }
     val voteRepository: IVoteRepository by lazy { VoteRepository() }
     val auditRepository: IAuditRepository by lazy { AuditRepository() }
+    val announcementRepository: IAnnouncementRepository by lazy { AnnouncementRepository() }
+    val electionTemplateRepository: IElectionTemplateRepository by lazy {
+        ElectionTemplateRepository(FirebaseFirestore.getInstance())
+    }
+
+    // ---- Use Cases ----
+    val submitVoteUseCase: SubmitVoteUseCase by lazy {
+        SubmitVoteUseCase(voteRepository, candidateRepository, electionRepository, encryptionManager, sessionManager, auditRepository)
+    }
 
     // ---- ViewModels (factory methods — new instance per call) ----
     fun authViewModel(): AuthViewModel =
         AuthViewModel(authRepository, sessionManager, auditRepository, pinManager)
 
     fun dashboardViewModel(): DashboardViewModel =
-        DashboardViewModel(electionRepository, voteRepository, authRepository, sessionManager)
+        DashboardViewModel(electionRepository, voteRepository, authRepository, sessionManager, announcementRepository)
 
     fun votingViewModel(): VotingViewModel =
         VotingViewModel(
@@ -61,7 +76,8 @@ class AppModule(context: Context) {
             voteRepository,
             encryptionManager,
             sessionManager,
-            auditRepository
+            auditRepository,
+            submitVoteUseCase
         )
 
     fun adminViewModel(): AdminViewModel =
@@ -72,7 +88,8 @@ class AppModule(context: Context) {
             auditRepository,
             authRepository,
             imageStorage,
-            sessionManager
+            sessionManager,
+            announcementRepository
         )
 
     fun monitorViewModel(): MonitorViewModel =

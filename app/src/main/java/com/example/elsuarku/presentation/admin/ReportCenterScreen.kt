@@ -244,7 +244,7 @@ fun ReportCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                                 }
                             }
                         })
-                        ExportFormatCard("PDF", "Document", Icons.Filled.PictureAsPdf, StatusError, Modifier.weight(1f), onClick = {
+                        ExportFormatCard("PDF", "Document", Icons.Filled.PictureAsPdf, DeepBlue, Modifier.weight(1f), onClick = {
                             if (selectedElection != null && !isPdfGenerating) {
                                 isPdfGenerating = true
                                 coroutineScope.launch {

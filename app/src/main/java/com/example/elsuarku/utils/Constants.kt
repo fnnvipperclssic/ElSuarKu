@@ -11,6 +11,7 @@ object Constants {
     const val COLLECTION_CANDIDATES = "candidates"
     const val COLLECTION_VOTES = "votes"
     const val COLLECTION_AUDIT_LOGS = "audit_logs"
+    const val COLLECTION_ANNOUNCEMENTS = "announcements"
 
     // SharedPreferences / DataStore keys
     const val PREF_SESSION_TOKEN = "session_token"

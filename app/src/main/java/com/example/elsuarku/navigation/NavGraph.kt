@@ -14,6 +14,7 @@ import com.example.elsuarku.presentation.admin.*
 import com.example.elsuarku.presentation.auth.*
 import com.example.elsuarku.presentation.dashboard.*
 import com.example.elsuarku.presentation.monitor.*
+import com.example.elsuarku.presentation.onboarding.*
 import com.example.elsuarku.presentation.settings.*
 import com.example.elsuarku.presentation.voting.*
 
@@ -35,7 +36,12 @@ private inline fun <reified T : ViewModel> viewModelFactory(crossinline creator:
 }
 
 @Composable
-fun ElSuarKuNavGraph(navController: NavHostController, authViewModel: AuthViewModel, appModule: AppModule) {
+fun ElSuarKuNavGraph(
+    navController: NavHostController,
+    authViewModel: AuthViewModel,
+    appModule: AppModule,
+    startDestination: String = Screen.Login.route
+) {
     // S5: Use viewModel() instead of remember{} so ViewModels survive config changes (rotation, etc.)
     // Factory creates a new instance per screen-level scope
     val votingViewModel: VotingViewModel = viewModel(factory = viewModelFactory { appModule.votingViewModel() })
@@ -43,7 +49,19 @@ fun ElSuarKuNavGraph(navController: NavHostController, authViewModel: AuthViewMo
     val monitorViewModel: MonitorViewModel = viewModel(factory = viewModelFactory { appModule.monitorViewModel() })
     val dashboardViewModel: DashboardViewModel = viewModel(factory = viewModelFactory { appModule.dashboardViewModel() })
 
-    NavHost(navController = navController, startDestination = Screen.Login.route) {
+    NavHost(navController = navController, startDestination = startDestination) {
+
+        // ==================== ONBOARDING ====================
+        composable(Screen.Onboarding.route) {
+            OnboardingScreen(
+                onGetStarted = {
+                    appModule.sessionManager.setOnboardingComplete()
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                    }
+                }
+            )
+        }
 
         // ==================== AUTH ====================
         composable(Screen.Login.route) {
@@ -109,11 +127,12 @@ fun ElSuarKuNavGraph(navController: NavHostController, authViewModel: AuthViewMo
 
         // ==================== ADMIN ====================
         composable(Screen.AdminDashboard.route) {
-            AdminDashboardScreen(viewModel = adminViewModel, onNavigateToElections = { navController.navigate(Screen.ManageElection.route) }, onNavigateToUserManagement = { navController.navigate(Screen.UserManagement.route) }, onNavigateToReport = { navController.navigate(Screen.ReportCenter.route) }, onNavigateToSecurity = { navController.navigate(Screen.AdminSecurity.route) }, onNavigateToSettings = { navController.navigate(Screen.Settings.route) }, onLogout = { authViewModel.logout(); navController.navigate(Screen.Login.route) { popUpTo(0) { inclusive = true } } })
+            AdminDashboardScreen(viewModel = adminViewModel, onNavigateToElections = { navController.navigate(Screen.ManageElection.route) }, onNavigateToUserManagement = { navController.navigate(Screen.UserManagement.route) }, onNavigateToReport = { navController.navigate(Screen.ReportCenter.route) }, onNavigateToSecurity = { navController.navigate(Screen.AdminSecurity.route) }, onNavigateToAnnouncements = { navController.navigate(Screen.ManageAnnouncement.route) }, onNavigateToSettings = { navController.navigate(Screen.Settings.route) }, onLogout = { authViewModel.logout(); navController.navigate(Screen.Login.route) { popUpTo(0) { inclusive = true } } })
         }
         composable(Screen.ManageElection.route) { ManageElectionScreen(viewModel = adminViewModel, onManageCandidates = { eid -> navController.navigate(Screen.ManageCandidate.createRoute(eid)) }, onBack = { navController.popBackStack() }) }
         composable(Screen.ManageCandidate.route, arguments = listOf(navArgument("electionId") { type = NavType.StringType })) { be -> ManageCandidateScreen(electionId = be.arguments?.getString("electionId") ?: "", viewModel = adminViewModel, onBack = { navController.popBackStack() }) }
         composable(Screen.UserManagement.route) { UserManagementScreen(viewModel = adminViewModel, onBack = { navController.popBackStack() }) }
+        composable(Screen.ManageAnnouncement.route) { ManageAnnouncementScreen(viewModel = adminViewModel, onBack = { navController.popBackStack() }) }
         composable(Screen.ReportCenter.route) { ReportCenterScreen(viewModel = adminViewModel, onBack = { navController.popBackStack() }) }
         composable(Screen.AdminSecurity.route) { SecurityCenterScreen(viewModel = adminViewModel, onBack = { navController.popBackStack() }) }
 

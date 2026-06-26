@@ -11,6 +11,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,15 +101,31 @@ fun SecurityCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
 
                     // ── Security Diagnostics ──
                     item {
-                        val attestationReport = remember {
-                            runCatching {
-                                KeyAttestationVerifier.verifyKeyAttestation(Constants.KEY_ALIAS)
-                            }.getOrNull()
+                        // Run security diagnostics off the main thread to avoid jank
+                        var attestationReport by remember {
+                            mutableStateOf<KeyAttestationVerifier.AttestationReport?>(null)
                         }
-                        val sslResult = remember {
-                            runCatching {
-                                SslInterceptionDetector.checkForInterception()
-                            }.getOrNull()
+                        var sslResult by remember {
+                            mutableStateOf<SslInterceptionDetector.Result?>(null)
+                        }
+                        var diagnosticsRun by remember { mutableStateOf(false) }
+
+                        LaunchedEffect(Unit) {
+                            if (!diagnosticsRun) {
+                                diagnosticsRun = true
+                                val attest = withContext(Dispatchers.Default) {
+                                    runCatching {
+                                        KeyAttestationVerifier.verifyKeyAttestation(Constants.KEY_ALIAS)
+                                    }.getOrNull()
+                                }
+                                val ssl = withContext(Dispatchers.Default) {
+                                    runCatching {
+                                        SslInterceptionDetector.checkForInterception()
+                                    }.getOrNull()
+                                }
+                                attestationReport = attest
+                                sslResult = ssl
+                            }
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,15 +153,16 @@ fun SecurityCenterScreen(viewModel: AdminViewModel, onBack: () -> Unit) {
                                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                                             color = DeepBlueDark
                                         )
-                                        if (attestationReport != null) {
-                                            val bootLabel = when (attestationReport.verifiedBootState) {
+                                        val attestReport = attestationReport
+                                        if (attestReport != null) {
+                                            val bootLabel = when (attestReport.verifiedBootState) {
                                                 KeyAttestationVerifier.AttestationReport.BootState.VERIFIED -> "Verified Boot ✓"
                                                 KeyAttestationVerifier.AttestationReport.BootState.SELF_SIGNED -> "Self-Signed Boot ⚠"
                                                 KeyAttestationVerifier.AttestationReport.BootState.UNVERIFIED -> "Unverified Boot ✗"
                                                 KeyAttestationVerifier.AttestationReport.BootState.FAILED -> "Boot State: FAILED ✗"
                                             }
                                             Text(
-                                                "$bootLabel · StrongBox: ${if (attestationReport.isStrongBox) "Yes" else "No"} · TEE: ${if (attestationReport.isTeeEnforced) "Yes" else "No"}",
+                                                "$bootLabel · StrongBox: ${if (attestReport.isStrongBox) "Yes" else "No"} · TEE: ${if (attestReport.isTeeEnforced) "Yes" else "No"}",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = DeepBlueLight
                                             )

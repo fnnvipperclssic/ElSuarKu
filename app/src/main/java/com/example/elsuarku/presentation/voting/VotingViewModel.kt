@@ -3,16 +3,15 @@ package com.example.elsuarku.presentation.voting
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.elsuarku.data.model.AuditAction
 import com.example.elsuarku.data.model.Candidate
 import com.example.elsuarku.data.model.Election
-import com.example.elsuarku.data.model.ElectionStatus
-import com.example.elsuarku.data.model.ReconciliationStatus
-import com.example.elsuarku.data.model.Vote
 import com.example.elsuarku.domain.repository.IAuditRepository
 import com.example.elsuarku.domain.repository.ICandidateRepository
 import com.example.elsuarku.domain.repository.IElectionRepository
 import com.example.elsuarku.domain.repository.IVoteRepository
+import com.example.elsuarku.domain.usecase.SubmitVoteParams
+import com.example.elsuarku.domain.usecase.SubmitVoteResult
+import com.example.elsuarku.domain.usecase.SubmitVoteUseCase
 import com.example.elsuarku.security.EncryptionManager
 import com.example.elsuarku.security.IntegrityVerifier
 import com.example.elsuarku.security.SessionManager
@@ -30,7 +29,8 @@ class VotingViewModel(
     private val voteRepository: IVoteRepository,
     private val encryptionManager: EncryptionManager,
     private val sessionManager: SessionManager,
-    private val auditRepository: IAuditRepository
+    private val auditRepository: IAuditRepository,
+    private val submitVoteUseCase: SubmitVoteUseCase
 ) : ViewModel() {
 
     data class ElectionListState(
@@ -171,50 +171,18 @@ class VotingViewModel(
             }
             Log.d(TAG, "submitVote: userId=$userId")
 
-            // ── S4: Validate election is still active and not expired ──
-            val election = _voteState.value.election
-            if (election != null) {
-                if (election.status != ElectionStatus.ACTIVE) {
-                    Log.w(TAG, "submitVote: REJECTED — election status=${election.status}")
-                    _voteState.value = _voteState.value.copy(
-                        isSubmitting = false,
-                        error = "Pemilihan sudah tidak aktif (status: ${election.status.name})"
-                    )
-                    return@launch
-                }
-                if (System.currentTimeMillis() > election.endDate) {
-                    Log.w(TAG, "submitVote: REJECTED — election expired")
-                    _voteState.value = _voteState.value.copy(
-                        isSubmitting = false,
-                        error = "Pemilihan sudah berakhir"
-                    )
-                    return@launch
-                }
-                if (System.currentTimeMillis() < election.startDate) {
-                    Log.w(TAG, "submitVote: REJECTED — election not yet started")
-                    _voteState.value = _voteState.value.copy(
-                        isSubmitting = false,
-                        error = "Pemilihan belum dimulai"
-                    )
-                    return@launch
-                }
-            }
-            Log.d(TAG, "submitVote: election validation OK")
-
             // Compute anonymous voter hash
             val voterHash = IntegrityVerifier.computeVoterHash(userId, electionId)
-            Log.d(TAG, "submitVote: voterHash=${voterHash.take(8)}...")
 
             // Encrypt vote + HMAC integrity + verification token
-            val encryptedData: String
-            val hash: String
-            val hmac: String
-            val verificationToken: String
+            val encryptedData: String; val hash: String; val hmac: String; val verificationToken: String
             try {
                 val timestamp = System.currentTimeMillis()
                 val voteData = "vote:$userId:$electionId:$candidateId:$timestamp"
                 encryptedData = encryptionManager.encrypt(voteData)
-                val integrity = IntegrityVerifier.generateVoteSignature(userId, electionId, candidateId, timestamp)
+                val integrity = IntegrityVerifier.generateVoteSignature(
+                    userId, electionId, candidateId, timestamp
+                )
                 hash = integrity.hash
                 hmac = integrity.hmac
                 verificationToken = integrity.verificationToken
@@ -227,74 +195,22 @@ class VotingViewModel(
                 return@launch
             }
 
-            val vote = Vote(
+            // Delegate to use case for two-phase commit submission
+            val params = SubmitVoteParams(
+                userId = userId,
+                userName = sessionManager.getUserName(),
+                userRole = sessionManager.getUserRole()?.name ?: "",
                 electionId = electionId,
+                candidateId = candidateId,
                 voterHash = voterHash,
                 encryptedVoteData = encryptedData,
                 hash = hash,
                 hmac = hmac,
-                verificationToken = verificationToken,
-                reconciliationStatus = ReconciliationStatus.PENDING_RECONCILIATION
+                verificationToken = verificationToken
             )
 
-            // ── TWO-PHASE COMMIT ──
-            // Phase 1: Atomically write the vote document (prevents double-voting)
-            Log.d(TAG, "submitVote: PHASE 1 — atomic vote write via transaction...")
-            when (val result = voteRepository.submitVote(vote)) {
-                is Resource.Success -> {
-                    Log.i(TAG, "submitVote: PHASE 1 OK — vote persisted")
-
-                    // Phase 2a: Increment candidate counter (critical)
-                    val candidateOk = try {
-                        candidateRepository.incrementVoteCount(candidateId)
-                        true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "submitVote: PHASE 2a FAILED — candidate counter", e)
-                        false
-                    }
-
-                    // Phase 2b: Increment election counter (critical)
-                    val electionOk = try {
-                        electionRepository.incrementVotedCount(electionId)
-                        true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "submitVote: PHASE 2b FAILED — election counter", e)
-                        false
-                    }
-
-                    // If both counters succeeded, mark vote CONFIRMED
-                    if (candidateOk && electionOk) {
-                        Log.i(TAG, "submitVote: PHASE 2 OK — all counters synced")
-                        // Update reconciliation status to CONFIRMED
-                        // (fire-and-forget — vote is already safe)
-                        try {
-                            voteRepository.updateReconciliationStatus(
-                                voterHash, electionId,
-                                ReconciliationStatus.CONFIRMED
-                            )
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to update reconciliation status", e)
-                        }
-                    } else {
-                        // Vote is saved but counters inconsistent — needs reconciliation
-                        Log.w(TAG, "submitVote: PHASE 2 PARTIAL — vote saved, counters need reconciliation")
-                    }
-
-                    // Phase 3: Audit log (non-critical, fire-and-forget)
-                    try {
-                        auditRepository.log(
-                            actorId = userId,
-                            actorName = sessionManager.getUserName(),
-                            actorRole = sessionManager.getUserRole()?.name ?: "",
-                            action = AuditAction.VOTE_CAST,
-                            target = electionId,
-                            targetName = candidateId,
-                            detail = "reconciliation=${if (candidateOk && electionOk) "CONFIRMED" else "PENDING"}"
-                        )
-                    } catch (e: Exception) {
-                        Log.w(TAG, "audit log failed (non-critical)", e)
-                    }
-
+            when (val result = submitVoteUseCase.execute(params, _voteState.value.election)) {
+                is SubmitVoteResult.Success -> {
                     // Clear step-up auth — needs fresh auth for next vote
                     sessionManager.clearStepUpAuth()
 
@@ -302,19 +218,16 @@ class VotingViewModel(
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
                         isSuccess = true,
-                        verificationToken = verificationToken
+                        verificationToken = result.verificationToken
                     )
                 }
-                is Resource.Error -> {
-                    Log.e(TAG, "submitVote: PHASE 1 FAILED — ${result.message}")
+                is SubmitVoteResult.Error -> {
+                    Log.e(TAG, "submitVote: FAILED — ${result.error.technical}")
                     _voteState.value = _voteState.value.copy(
                         isSubmitting = false,
-                        error = result.message
+                        error = result.error.userMessage
                     )
                 }
-                is Resource.Loading -> {}
-                is Resource.Empty -> {}
-                is Resource.Cached -> {}
             }
         }
     }

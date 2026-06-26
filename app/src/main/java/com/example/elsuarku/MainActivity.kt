@@ -161,13 +161,21 @@ private fun ElSuarKuApp(
         }
     }
 
+    // Determine start destination: show onboarding for first-time users
+    val startDestination = if (!appModule.sessionManager.isOnboardingComplete()) {
+        Screen.Onboarding.route
+    } else {
+        Screen.Login.route
+    }
+
     // Always compose NavGraph so NavHost is available for navigation.
     // Splash is rendered as a full-screen overlay during loading.
     Box(modifier = Modifier.fillMaxSize()) {
         ElSuarKuNavGraph(
             navController = navController,
             authViewModel = authViewModel,
-            appModule = appModule
+            appModule = appModule,
+            startDestination = startDestination
         )
 
         if (authState is AuthViewModel.AuthUiState.Loading) {

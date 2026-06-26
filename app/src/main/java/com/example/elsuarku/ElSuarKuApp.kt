@@ -3,6 +3,7 @@ package com.example.elsuarku
 import android.app.Application
 import android.os.StrictMode
 import android.util.Log
+import com.example.elsuarku.security.ReconciliationWorker
 import com.example.elsuarku.utils.Constants
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -10,6 +11,9 @@ import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderF
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 /**
  * ElSuarKu Application class.
@@ -112,6 +116,18 @@ class ElSuarKuApp : Application() {
             Log.i(TAG, "Firestore configured with persistent cache")
         } catch (e: Exception) {
             Log.e(TAG, "Firestore configuration failed: ${e.message}", e)
+        }
+
+        // ── Schedule Background Reconciliation ──
+        // Offload to background to avoid StrictMode DiskReadViolation
+        // (WorkManager initialization reads from its internal database)
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                ReconciliationWorker.schedule(this@ElSuarKuApp)
+                Log.i(TAG, "Reconciliation worker scheduled")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to schedule reconciliation worker: ${e.message}")
+            }
         }
     }
 

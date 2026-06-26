@@ -2,6 +2,8 @@ package com.example.elsuarku.utils
 
 import com.example.elsuarku.data.model.Election
 import com.example.elsuarku.data.model.Vote
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Tracks voter turnout statistics for elections.
@@ -61,8 +63,9 @@ object VoterTurnoutTracker {
         val dayCounts = mutableMapOf<Int, Int>()
 
         votes.forEach { vote ->
-            val voteDate = java.util.Date(vote.timestamp)
-            val hour = voteDate.hours  // java.util.Date.getHours() deprecated but works on API 36
+            val voteInstant = Instant.ofEpochMilli(vote.timestamp)
+            val voteDateTime = voteInstant.atZone(ZoneId.systemDefault())
+            val hour = voteDateTime.hour
             hourCounts[hour]++
 
             val voteEpochDay = vote.timestamp / 86_400_000L
